@@ -1,4 +1,0 @@
-pydantic==2.6.4,<3.0.0
-typing-extensions>=4.8.0
-openapi-pydantic-v2>=0.1.0,<2.0.0
-werkzeug>=2.2.3
