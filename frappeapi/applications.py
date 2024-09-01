@@ -106,26 +106,23 @@ class FrappeAPI:
 		self.openapi_schema: Optional[Dict[str, Any]] = None
 		self.servers = servers or [{"url": "/"}]
 
-	def generate_openapi_schema(self):
-		paths = {}
-		for item in self.routes:
-			paths[item["path"]] = item["item"]
-
-		openapi_model = OpenAPI(
-			openapi="3.0.0",
-			info=Info(title=self.title, version=self.version, description=self.description),
-			paths=paths,
-			servers=[Server(**server) for server in self.servers],
-		)
-		return openapi_model
-
-	def generate_openapi_json(self):
-		openapi_schema = self.generate_openapi_schema().dict(by_alias=True, exclude_none=True)
+	def openapi_json(self):
+		openapi_schema = self._openapi().model_dump(by_alias=True, exclude_none=True)
 		return json.dumps(openapi_schema, indent=2)
 
-	def openapi(self):
+	def _openapi(self):
 		if not self.openapi_schema:
-			self.openapi_schema = self.generate_openapi_schema()
+			paths = {}
+			for item in self.routes:
+				paths[item["path"]] = item["item"]
+
+			openapi_model = OpenAPI(
+				openapi="3.0.0",
+				info=Info(title=self.title, version=self.version, description=self.description),
+				paths=paths,
+				servers=[Server(**server) for server in self.servers],
+			)
+			return openapi_model
 
 		return self.openapi_schema
 
