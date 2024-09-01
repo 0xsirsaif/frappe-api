@@ -11,18 +11,24 @@ theme:
     - navigation.sections
     - navigation.expand
     - toc.integrate
+    - content.code.copy
 
 repo_name: 0xsirsaif/frappe-api
 repo_url: https://github.com/0xsirsaif/frappe-api
 
 nav:
-  - Home: index.md
+  - FrappeAPI: index.md
+  - Roadmap: roadmap.md
+  - Learn: learn.md
 
 markdown_extensions:
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
   - pymdownx.tasklist:
       custom_checkbox: true
-  - admonition
   - toc:
       permalink: true
 

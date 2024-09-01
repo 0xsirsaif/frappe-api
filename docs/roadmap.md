@@ -1,27 +1,11 @@
-# FrappeAPI
+# Roadmap
 
-Build APIs for Frappe with the simplicity of FastAPI!
-
-⚠️ **Alert: Beta Version**
-
-This project is currently in beta and not yet ready for production use. Expect changes and improvements as we work towards a stable release.
-
-## Why?
-
-- Better API design
-- Automatic API documentation
-- Implement response-model-based serialization
-
-The goal is to make Building APIs for Frappe more intuitive, type-safe, and self-documenting, building upon Frappe's recent improvements.
-
-## Roadmap
-
-### Frappe Versions
+## Frappe Versions
 
 - [ ] Frappe V14 support
 - [ ] Frappe V15 support
 
-### Methods
+## Methods
 
 - [x] Implement `app.get(...)` method
 - [ ] Implement `app.post(...)` method
@@ -29,7 +13,7 @@ The goal is to make Building APIs for Frappe more intuitive, type-safe, and self
 - [ ] Implement `app.patch(...)` method
 - [ ] Implement `app.delete(...)` method
 
-### Query Parameter Features
+## Query Parameter Features
 
 - [ ] Automatic query parameter parsing/conversion based on type hints
 - [ ] Required query parameters `needy: str`
