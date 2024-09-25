@@ -23,19 +23,9 @@
 - [ ] Enum support for query parameters [path parameters - predefined values](https://fastapi.tiangolo.com/tutorial/path-params/#predefined-values)
 - [ ] Additional information and validation for query parameters
 
-  - [ ] String validations
-    - [ ] `min_length`
-    - [ ] `max_length`
-    - [ ] `regex pattern`
-  - [ ] Numeric validations
-    - [ ] `gt`
-    - [ ] `ge`
-    - [ ] `lt`
-    - [ ] `le`
-  - [ ] Metadata
-    - [ ] `title`
-    - [ ] `description`
-    - [ ] `deprecated`
+  - [ ] String validations `min_length`, `max_length`, `regex pattern`
+  - [ ] Numeric validations `gt`, `ge`, `lt`, `le`
+  - [ ] Metadata `title`, `description`, `deprecated`
 
 - [ ] to be continued...
 

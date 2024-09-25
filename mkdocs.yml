@@ -1,4 +1,5 @@
 site_name: FrappeAPI
+site_url: https://0xsirsaif.github.io/frappe-api/
 theme:
   name: material
   palette:
@@ -19,7 +20,6 @@ repo_url: https://github.com/0xsirsaif/frappe-api
 nav:
   - FrappeAPI: index.md
   - Roadmap: roadmap.md
-  - Learn: learn.md
 
 markdown_extensions:
   - pymdownx.superfences
