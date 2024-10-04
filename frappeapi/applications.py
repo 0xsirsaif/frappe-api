@@ -1,24 +1,164 @@
-import inspect
 import json
+from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-import frappe
-from frappe import whitelist
 from openapi_pydantic_v2 import Info, OpenAPI, Operation, PathItem, Response, Server
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from typing_extensions import Annotated, Doc
 from werkzeug.wrappers import Response as WerkzeugResponse
 
-from frappeapi.datastructures import QueryParams
-from frappeapi.utils import (
-	create_openapi_param_dict,
-	create_validator_model,
-	extract_relative_path,
-	format_validation_error,
-)
+from frappeapi.routing import APIRouter
 
 
 class FrappeAPI:
+	def __init__(
+		self,
+		title: str = "FrappeAPI",
+		summary: Optional[str] = None,
+		description: str = "",
+		version: str = "0.1.0",
+		servers: Optional[List[Dict[str, Union[str, Any]]]] = None,
+	):
+		self.title = title
+		self.summary = summary
+		self.description = description
+		self.version = version
+		self.servers = servers
+		self.router = APIRouter(prefix="/api/method")
+
+	def get(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		return self.router.get(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+		)
+
+	def post(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		return self.router.post(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+		)
+
+	def put(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		return self.router.put(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+		)
+
+	def delete(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		return self.router.delete(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+		)
+
+	def patch(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		return self.router.patch(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+		)
+
+	def options(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		return self.router.options(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+		)
+
+	def head(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		return self.router.head(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+		)
+
 	def __init__(
 		self,
 		title: Annotated[
@@ -105,6 +245,10 @@ class FrappeAPI:
 		self.routes: List[Dict[str, Any]] = []
 		self.openapi_schema: Optional[Dict[str, Any]] = None
 		self.servers = servers or [{"url": "/"}]
+		self.router = APIRouter(
+			prefix="/api/method",
+			default_response_class=WerkzeugResponse,
+		)
 
 	def openapi_json(self):
 		openapi_schema = self._openapi().model_dump(by_alias=True, exclude_none=True)
@@ -151,36 +295,86 @@ class FrappeAPI:
 		)
 		setattr(path_item["item"], method.lower(), operation)
 
-	def get(self, response_model: Any = None):
-		def decorator(func):
-			path = "/api/method/" + extract_relative_path(inspect.getfile(func)) + "." + func.__name__
+	def get(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		self.router.get(response_model, status_code, description, tags, summary, include_in_schema)
 
-			@whitelist(methods=["GET"])
-			def wrapper(*args, **kwargs):
-				try:
-					query_param_validator_model = create_validator_model(func)
-					query_params = QueryParams(frappe.request.query_string)
-					query_param_validator_model(**query_params.to_dict())
-				except ValidationError as e:
-					return format_validation_error(e)
+	def post(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Annotated[Optional[int], Doc("The status code to return")] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		self.router.post(response_model, status_code, description, tags, summary, include_in_schema)
 
-				valid_params = inspect.signature(func).parameters
-				filtered_args = {k: v for k, v in kwargs.items() if k in valid_params}
-				try:
-					result = func(*args, **filtered_args)
-					if issubclass(response_model, BaseModel):
-						response_content = json.dumps(response_model(**result).dict())
-						return WerkzeugResponse(response_content, status=200, mimetype="application/json")
-					else:
-						response_content = json.dumps(result)
-						return WerkzeugResponse(response_content, status=200, mimetype="application/json")
-				except Exception as exc:
-					error_response = {"detail": str(exc)}
-					response_body = json.dumps(error_response)
-					return WerkzeugResponse(response_body, status=500, mimetype="application/json")
+	def put(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		self.router.put(response_model, status_code, description, tags, summary, include_in_schema)
 
-			parameters = create_openapi_param_dict(func)
-			self.add_route(path=path, method="GET", response_model=response_model, parameters=parameters)
-			return wrapper
+	def delete(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		self.router.delete(response_model, status_code, description, tags, summary, include_in_schema)
 
-		return decorator
+	def patch(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		self.router.patch(response_model, status_code, description, tags, summary, include_in_schema)
+
+	def options(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		self.router.options(response_model, status_code, description, tags, summary, include_in_schema)
+
+	def head(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+	):
+		self.router.head(response_model, status_code, description, tags, summary, include_in_schema)

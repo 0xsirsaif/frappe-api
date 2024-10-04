@@ -8,7 +8,8 @@ from pydantic import ValidationError, create_model
 from werkzeug.wrappers import Response
 
 
-def extract_relative_path(full_path):
+def extract_endpoint_relative_path(func):
+	full_path = inspect.getfile(func)
 	path_parts = full_path.split(os.sep)
 	try:
 		apps_index = path_parts.index("apps") + 2
