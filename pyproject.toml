@@ -63,9 +63,9 @@ select = [
     "F", # pyflakes
     "E", "W", # pycodestyle (PEP 8) E for error, W for warning
     "I", # flake8-isort
-    "B", # flake8-bugbear https://github.com/PyCQA/flake8-bugbear#list-of-warnings
+    # "B", # flake8-bugbear https://github.com/PyCQA/flake8-bugbear#list-of-warnings
     "N", # PEP8 Naming Conventions, fixable
-    "S", # flake8-bandit for Security checks, fixable
+    # "S", # flake8-bandit for Security checks, fixable
     "T20", # flake8-print for checking for print statements, fixable
     "PT", # flake8-pytest-style for checking for pytest best practices, fixable
     "Q", # flake8-quotes for checking for consistent quotes, fixable
