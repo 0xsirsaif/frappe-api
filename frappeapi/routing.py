@@ -1,10 +1,30 @@
 import inspect
 import json
+import types
+from collections import deque
+from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, ForwardRef, List, Optional, Set, Type, Union
+from functools import lru_cache
+from typing import (
+	Any,
+	Callable,
+	Deque,
+	Dict,
+	ForwardRef,
+	FrozenSet,
+	List,
+	Mapping,
+	Optional,
+	Sequence,
+	Set,
+	Tuple,
+	Type,
+	Union,
+)
 
 try:
+	import frappe
 	from frappe import whitelist
 except ImportError:
 	from functools import wraps
@@ -20,25 +40,45 @@ except ImportError:
 		return decorator
 
 
-from pydantic import PydanticSchemaGenerationError
+from pydantic import BaseModel, PydanticSchemaGenerationError, ValidationError
 from pydantic._internal._typing_extra import eval_type_lenient as evaluate_forwardref
+from pydantic._internal._utils import lenient_issubclass
 from pydantic.fields import FieldInfo
-from pydantic_core import PydanticUndefined, PydanticUndefinedType as PydanticUndefinedType
-from typing_extensions import Literal
-from werkzeug.wrappers import Response as WerkzeugResponse
+from pydantic_core import PydanticUndefined, PydanticUndefinedType
+from typing_extensions import Literal, get_args, get_origin
+from werkzeug.datastructures import ImmutableMultiDict
+from werkzeug.wrappers import (
+	Request as WerkzeugRequest,
+	Response as WerkzeugResponse,
+)
 
 from frappeapi import params
-from frappeapi.models import BaseConfig, Dependant, ModelField
+from frappeapi.datastructures import QueryParams
+from frappeapi.exceptions import ErrorWrapper, FrappeAPIError
+from frappeapi.models import BaseConfig, Dependant, ModelField, _regenerate_error_with_loc
 from frappeapi.utils import Default, extract_endpoint_relative_path
 
 Required = PydanticUndefined
 Undefined = PydanticUndefined
 UndefinedType = PydanticUndefinedType
 Validator = Any
+UnionType = getattr(types, "UnionType", Union)
 
+sequence_annotation_to_type = {
+	Sequence: list,
+	List: list,
+	list: list,
+	Tuple: tuple,
+	tuple: tuple,
+	Set: set,
+	set: set,
+	FrozenSet: frozenset,
+	frozenset: frozenset,
+	Deque: deque,
+	deque: deque,
+}
 
-class FrappeAPIError(Exception):
-	pass
+sequence_types = tuple(sequence_annotation_to_type.keys())
 
 
 def create_model_field(
@@ -138,6 +178,161 @@ def add_param_to_fields(*, field: ModelField, dependant: Dependant) -> None:
 		dependant.cookie_params.append(field)
 
 
+def get_model_fields(model: Type[BaseModel]) -> List[ModelField]:
+	return [ModelField(field_info=field_info, name=name) for name, field_info in model.model_fields.items()]
+
+
+@lru_cache
+def get_cached_model_fields(model: Type[BaseModel]) -> List[ModelField]:
+	return get_model_fields(model)
+
+
+def _annotation_is_sequence(annotation: Union[Type[Any], None]) -> bool:
+	if lenient_issubclass(annotation, (str, bytes)):
+		return False
+	return lenient_issubclass(annotation, sequence_types)
+
+
+def field_annotation_is_sequence(annotation: Union[Type[Any], None]) -> bool:
+	origin = get_origin(annotation)
+	if origin is Union or origin is UnionType:
+		for arg in get_args(annotation):
+			if field_annotation_is_sequence(arg):
+				return True
+		return False
+	return _annotation_is_sequence(annotation) or _annotation_is_sequence(get_origin(annotation))
+
+
+def is_sequence_field(field: ModelField) -> bool:
+	return field_annotation_is_sequence(field.field_info.annotation)
+
+
+def _get_multidict_value(field: ModelField, values: Mapping[str, Any], alias: Union[str, None] = None) -> Any:
+	alias = alias or field.alias
+	if is_sequence_field(field) and isinstance(values, (ImmutableMultiDict)):
+		value = values.getlist(alias)
+	else:
+		value = values.get(alias, None)
+	if value is None or (is_sequence_field(field) and len(value) == 0):
+		if field.required:
+			return
+		else:
+			return deepcopy(field.default)
+	return value
+
+
+def get_missing_field_error(loc: Tuple[str, ...]) -> Dict[str, Any]:
+	error = ValidationError.from_exception_data(
+		"Field required", [{"type": "missing", "loc": loc, "input": {}}]
+	).errors(include_url=False)[0]
+	error["input"] = None
+	return error  # type: ignore[return-value]
+
+
+def _validate_value_with_model_field(
+	*, field: ModelField, value: Any, values: Dict[str, Any], loc: Tuple[str, ...]
+) -> Tuple[Any, List[Any]]:
+	if value is None:
+		if field.required:
+			return None, [get_missing_field_error(loc=loc)]
+		else:
+			return deepcopy(field.default), []
+
+	v_, errors_ = field.validate(value, values, loc=loc)
+	if isinstance(errors_, ErrorWrapper):
+		return None, [errors_]
+	elif isinstance(errors_, list):
+		new_errors = _regenerate_error_with_loc(errors=errors_, loc_prefix=())
+		return None, new_errors
+	else:
+		return v_, []
+
+
+def request_params_to_args(
+	fields: Sequence[ModelField],
+	received_params: Union[Mapping[str, Any], QueryParams],
+) -> Tuple[Dict[str, Any], List[Any]]:
+	values: Dict[str, Any] = {}
+	errors: List[Dict[str, Any]] = []
+
+	if not fields:
+		return values, errors
+
+	# If there is only one field, and it is a Pydantic BaseModel, then we need to extract all the fields from the model
+	first_field = fields[0]
+	fields_to_extract = fields
+	single_not_embedded_field = False
+	if len(fields) == 1 and lenient_issubclass(first_field.type_, BaseModel):
+		print("? IF ONLY ONE FIELD")
+		fields_to_extract = get_cached_model_fields(first_field.type_)
+		single_not_embedded_field = True
+
+	params_to_process: Dict[str, Any] = {}
+	processed_keys = set()
+
+	for field in fields_to_extract:
+		print("> Field:", field)
+		alias = None
+		value = _get_multidict_value(field, received_params, alias=alias)
+		print("> Value:", value)
+		if value is not None:
+			params_to_process[field.name] = value
+		processed_keys.add(alias or field.alias)
+		processed_keys.add(field.name)
+
+	for key, value in received_params.items():
+		print("> Key:", key)
+		if key not in processed_keys:
+			params_to_process[key] = value
+
+	if single_not_embedded_field:
+		print("? SINGLE NOT EMBEDDED FIELD")
+		field_info = first_field.field_info
+		assert isinstance(field_info, params.Param), "Params must be subclasses of Param"
+
+		loc: Tuple[str, ...] = (field_info.in_.value,)
+		v_, errors_ = _validate_value_with_model_field(
+			field=first_field, value=params_to_process, values=values, loc=loc
+		)
+
+		return {first_field.name: v_}, errors_
+
+	for field in fields:
+		value = _get_multidict_value(field, received_params)
+		field_info = field.field_info
+		assert isinstance(field_info, params.Param), "Params must be subclasses of Param"
+		loc = (field_info.in_.value, field.alias)
+		v_, errors_ = _validate_value_with_model_field(field=field, value=value, values=values, loc=loc)
+		if errors_:
+			errors.extend(errors_)
+		else:
+			values[field.name] = v_
+
+	return values, errors
+
+
+def solve_dependencies(
+	*, dependant: Dependant, request: Union[WerkzeugRequest, Any], response: Optional[WerkzeugResponse] = None
+):
+	values: Dict[str, Any] = {}
+	errors: List[Any] = []
+	print("???????? In solve_dependencies")
+	if response is None:
+		response = WerkzeugResponse()
+		if "content-length" in response.headers:
+			del response.headers["content-length"]
+
+		response.status_code = 200  # Default to OK status
+
+	request_query_params = QueryParams(frappe.request.query_string).to_dict()
+	print("> Dependant Query Values:", dependant.query_params)
+	print("> Request Query Params:", request_query_params)
+
+	query_values, query_errors = request_params_to_args(dependant.query_params, request_query_params)
+	print("> Query Values:", query_values)
+	print("> Query Errors:", query_errors)
+
+
 class APIRoute:
 	def __init__(
 		self,
@@ -193,6 +388,7 @@ class APIRoute:
 				security_scopes=None,
 				use_cache=True,
 			)
+			print("> Dependant:", dependant)
 
 			for param_name, param in signature_params.items():
 				param_details = analyze_param(
@@ -201,7 +397,16 @@ class APIRoute:
 				assert param_details.field is not None
 				add_param_to_fields(field=param_details.field, dependant=dependant)
 
+			print("> Dependant After Adding Params:", dependant)
+
 			assert dependant.call is not None, "dependant.call must be a function"
+
+			# TODO: Validation and serialization
+			errors: List[Any] = []
+			request = frappe.request
+			# werkzeug.local.LocalProxy
+			print("> Request:", request, type(request))
+			solve_dependencies(dependant=dependant, request=request)
 
 			# Remove known Frappe-specific arguments
 			kwargs.pop("cmd", None)
