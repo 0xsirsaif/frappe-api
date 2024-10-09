@@ -19,6 +19,7 @@ class FrappeAPI:
 		self.description = description
 		self.version = version
 		self.servers = servers
+
 		self.router = APIRouter(prefix="/api/method")
 
 	def get(
