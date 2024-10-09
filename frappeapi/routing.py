@@ -54,8 +54,16 @@ from werkzeug.wrappers import (
 
 from frappeapi import params
 from frappeapi.datastructures import QueryParams
+from frappeapi.exception_handler import RequestValidationError
 from frappeapi.exceptions import ErrorWrapper, FrappeAPIError
-from frappeapi.models import BaseConfig, Dependant, ModelField, _regenerate_error_with_loc
+from frappeapi.models import (
+	BaseConfig,
+	Dependant,
+	ModelField,
+	SolvedDependency,
+	_normalize_errors,
+	_regenerate_error_with_loc,
+)
 from frappeapi.utils import Default, extract_endpoint_relative_path
 
 Required = PydanticUndefined
@@ -252,6 +260,7 @@ def request_params_to_args(
 	fields: Sequence[ModelField],
 	received_params: Union[Mapping[str, Any], QueryParams],
 ) -> Tuple[Dict[str, Any], List[Any]]:
+	print("====================")
 	values: Dict[str, Any] = {}
 	errors: List[Dict[str, Any]] = []
 
@@ -270,21 +279,29 @@ def request_params_to_args(
 	params_to_process: Dict[str, Any] = {}
 	processed_keys = set()
 
+	print("@@@@@")
 	for field in fields_to_extract:
-		print("> Field:", field)
+		print("@ FIELD:", field)
 		alias = None
 		value = _get_multidict_value(field, received_params, alias=alias)
-		print("> Value:", value)
+		print("@ VALUE:", value)
 		if value is not None:
 			params_to_process[field.name] = value
 		processed_keys.add(alias or field.alias)
 		processed_keys.add(field.name)
 
+	print("@@@@@ Processed Keys", processed_keys)
+	print("@@@@@ Params to Process", params_to_process)
+
+	print("#####")
 	for key, value in received_params.items():
-		print("> Key:", key)
+		print("### KEY:", key)
+		print("### VALUE:", value)
 		if key not in processed_keys:
 			params_to_process[key] = value
+	print("##### Params to Process", params_to_process)
 
+	print("!!!!!")
 	if single_not_embedded_field:
 		print("? SINGLE NOT EMBEDDED FIELD")
 		field_info = first_field.field_info
@@ -297,9 +314,13 @@ def request_params_to_args(
 
 		return {first_field.name: v_}, errors_
 
+	print("$$$$$$")
 	for field in fields:
+		print("$ FIELD:", field)
 		value = _get_multidict_value(field, received_params)
+		print("$ VALUE:", value)
 		field_info = field.field_info
+		print("$ FIELD INFO:", field_info)
 		assert isinstance(field_info, params.Param), "Params must be subclasses of Param"
 		loc = (field_info.in_.value, field.alias)
 		v_, errors_ = _validate_value_with_model_field(field=field, value=value, values=values, loc=loc)
@@ -329,8 +350,16 @@ def solve_dependencies(
 	print("> Request Query Params:", request_query_params)
 
 	query_values, query_errors = request_params_to_args(dependant.query_params, request_query_params)
+	values.update(query_values)
+	errors.extend(query_errors)
 	print("> Query Values:", query_values)
 	print("> Query Errors:", query_errors)
+
+	return SolvedDependency(
+		values=values,
+		errors=errors,
+		response=response,
+	)
 
 
 class APIRoute:
@@ -406,7 +435,14 @@ class APIRoute:
 			request = frappe.request
 			# werkzeug.local.LocalProxy
 			print("> Request:", request, type(request))
-			solve_dependencies(dependant=dependant, request=request)
+			solved_result = solve_dependencies(dependant=dependant, request=request)
+			errors = solved_result.errors
+			body = None
+			if not errors:
+				pass
+			else:
+				validation_error = RequestValidationError(_normalize_errors(errors), body=body)
+				raise validation_error
 
 			# Remove known Frappe-specific arguments
 			kwargs.pop("cmd", None)

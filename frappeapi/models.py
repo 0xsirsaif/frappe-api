@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined, PydanticUndefinedType as PydanticUndefinedType
 from typing_extensions import Annotated, Literal
+from werkzeug.wrappers import Response as WerkzeugResponse
 
 Required = PydanticUndefined
 Undefined = PydanticUndefined
@@ -162,3 +163,10 @@ class Dependant:
 
 	def __post_init__(self) -> None:
 		self.cache_key = (self.call, tuple(sorted(set(self.security_scopes or []))))
+
+
+@dataclass
+class SolvedDependency:
+	values: Dict[str, Any]
+	errors: List[Any]
+	response: WerkzeugResponse
