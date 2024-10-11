@@ -424,9 +424,15 @@ class APIRoute:
 				response_content, status=self.status_code or 200, mimetype="application/json"
 			)
 		except HTTPException as exc:
-			return http_exception_handler(request, exc)
+			if self.exception_handlers.get(HTTPException):
+				return self.exception_handlers[HTTPException](request, exc)
+			else:
+				return http_exception_handler(request, exc)
 		except RequestValidationError as exc:
-			return request_validation_exception_handler(request, exc)
+			if self.exception_handlers.get(RequestValidationError):
+				return self.exception_handlers[RequestValidationError](request, exc)
+			else:
+				return request_validation_exception_handler(request, exc)
 		except Exception as exc:
 			# Check if there's a custom handler for this exception type
 			for exc_type, handler in self.exception_handlers.items():
