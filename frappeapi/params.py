@@ -1,25 +1,18 @@
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from pydantic import AliasChoices, AliasPath, AnyUrl, ConfigDict
+from openapi_pydantic_v2 import Example
+from pydantic import AliasChoices, AliasPath
 from pydantic.fields import FieldInfo
 from pydantic.version import VERSION
 from pydantic_core import PydanticUndefined
-from typing_extensions import TypedDict, deprecated
+from typing_extensions import deprecated
 
 Undefined = PydanticUndefined
 _Unset: Any = Undefined
 
 PYDANTIC_VERSION = VERSION
-
-
-class Example(TypedDict, total=False):
-	__pydantic_config__ = ConfigDict(extra="allow")
-
-	summary: Optional[str]
-	description: Optional[str]
-	value: Optional[Any]
-	externalValue: Optional[AnyUrl]
+PYDANTIC_V2 = PYDANTIC_VERSION.startswith("2.")
 
 
 class ParamTypes(Enum):
