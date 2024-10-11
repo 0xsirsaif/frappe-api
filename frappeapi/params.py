@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from pydantic import AliasChoices, AliasPath, AnyUrl
+from pydantic import AliasChoices, AliasPath, AnyUrl, ConfigDict
 from pydantic.fields import FieldInfo
 from pydantic.version import VERSION
 from pydantic_core import PydanticUndefined
@@ -14,12 +14,12 @@ PYDANTIC_VERSION = VERSION
 
 
 class Example(TypedDict, total=False):
+	__pydantic_config__ = ConfigDict(extra="allow")
+
 	summary: Optional[str]
 	description: Optional[str]
 	value: Optional[Any]
 	externalValue: Optional[AnyUrl]
-
-	__pydantic_config__ = {"extra": "allow"}
 
 
 class ParamTypes(Enum):

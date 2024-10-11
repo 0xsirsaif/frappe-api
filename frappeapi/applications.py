@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 from frappeapi.routing import APIRouter
 from frappeapi.utils import Default
@@ -20,7 +20,7 @@ class FrappeAPI:
 		self.version = version
 		self.servers = servers
 
-		self.exception_handlers = {}
+		self.exception_handlers: Dict[Type[Exception], Callable] = {}
 		self.router = APIRouter(
 			prefix="/api/method",
 			exception_handlers=self.exception_handlers,

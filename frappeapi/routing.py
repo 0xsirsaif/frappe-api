@@ -416,18 +416,7 @@ class APIRoute:
 				validation_error = RequestValidationError(_normalize_errors(errors), body=body)
 				raise validation_error
 
-			# Remove known Frappe-specific arguments
-			kwargs.pop("cmd", None)
-
-			# Get the function's signature
-			sig = inspect.signature(self.func)
-
-			# Filter arguments to only those the function expects
-			bound_args = sig.bind(*args, **kwargs)
-			bound_args.apply_defaults()
-
-			# Call the function with the filtered arguments
-			result = self.func(*bound_args.args, **bound_args.kwargs)
+			result = self.func(**solved_result.values)
 
 			# Convert the result to JSON and return a response
 			response_content = json.dumps(result)
