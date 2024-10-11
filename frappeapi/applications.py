@@ -13,6 +13,7 @@ class FrappeAPI:
 		description: str = "",
 		version: str = "0.1.0",
 		servers: Optional[List[Dict[str, Union[str, Any]]]] = None,
+		exception_handlers: Optional[Dict[Type[Exception], Callable]] = None,
 	):
 		self.title = title
 		self.summary = summary
@@ -20,7 +21,9 @@ class FrappeAPI:
 		self.version = version
 		self.servers = servers
 
-		self.exception_handlers: Dict[Type[Exception], Callable] = {}
+		self.exception_handlers: Dict[Type[Exception], Callable] = (
+			{} if exception_handlers is None else exception_handlers
+		)
 		self.router = APIRouter(
 			prefix="/api/method",
 			exception_handlers=self.exception_handlers,
