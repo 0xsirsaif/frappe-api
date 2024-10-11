@@ -54,8 +54,8 @@ from werkzeug.wrappers import (
 
 from frappeapi import params
 from frappeapi.datastructures import QueryParams
-from frappeapi.exception_handler import RequestValidationError
-from frappeapi.exceptions import ErrorWrapper, FrappeAPIError
+from frappeapi.exception_handler import http_exception_handler, request_validation_exception_handler
+from frappeapi.exceptions import ErrorWrapper, FrappeAPIError, HTTPException, RequestValidationError
 from frappeapi.models import (
 	BaseConfig,
 	Dependant,
@@ -204,10 +204,8 @@ def _annotation_is_sequence(annotation: Union[Type[Any], None]) -> bool:
 def field_annotation_is_sequence(annotation: Union[Type[Any], None]) -> bool:
 	origin = get_origin(annotation)
 	if origin is Union or origin is UnionType:
-		for arg in get_args(annotation):
-			if field_annotation_is_sequence(arg):
-				return True
-		return False
+		return any(field_annotation_is_sequence(arg) for arg in get_args(annotation))
+
 	return _annotation_is_sequence(annotation) or _annotation_is_sequence(get_origin(annotation))
 
 
@@ -260,7 +258,6 @@ def request_params_to_args(
 	fields: Sequence[ModelField],
 	received_params: Union[Mapping[str, Any], QueryParams],
 ) -> Tuple[Dict[str, Any], List[Any]]:
-	print("====================")
 	values: Dict[str, Any] = {}
 	errors: List[Dict[str, Any]] = []
 
@@ -272,38 +269,25 @@ def request_params_to_args(
 	fields_to_extract = fields
 	single_not_embedded_field = False
 	if len(fields) == 1 and lenient_issubclass(first_field.type_, BaseModel):
-		print("? IF ONLY ONE FIELD")
 		fields_to_extract = get_cached_model_fields(first_field.type_)
 		single_not_embedded_field = True
 
 	params_to_process: Dict[str, Any] = {}
 	processed_keys = set()
 
-	print("@@@@@")
 	for field in fields_to_extract:
-		print("@ FIELD:", field)
 		alias = None
 		value = _get_multidict_value(field, received_params, alias=alias)
-		print("@ VALUE:", value)
 		if value is not None:
 			params_to_process[field.name] = value
 		processed_keys.add(alias or field.alias)
 		processed_keys.add(field.name)
 
-	print("@@@@@ Processed Keys", processed_keys)
-	print("@@@@@ Params to Process", params_to_process)
-
-	print("#####")
 	for key, value in received_params.items():
-		print("### KEY:", key)
-		print("### VALUE:", value)
 		if key not in processed_keys:
 			params_to_process[key] = value
-	print("##### Params to Process", params_to_process)
 
-	print("!!!!!")
 	if single_not_embedded_field:
-		print("? SINGLE NOT EMBEDDED FIELD")
 		field_info = first_field.field_info
 		assert isinstance(field_info, params.Param), "Params must be subclasses of Param"
 
@@ -314,13 +298,9 @@ def request_params_to_args(
 
 		return {first_field.name: v_}, errors_
 
-	print("$$$$$$")
 	for field in fields:
-		print("$ FIELD:", field)
 		value = _get_multidict_value(field, received_params)
-		print("$ VALUE:", value)
 		field_info = field.field_info
-		print("$ FIELD INFO:", field_info)
 		assert isinstance(field_info, params.Param), "Params must be subclasses of Param"
 		loc = (field_info.in_.value, field.alias)
 		v_, errors_ = _validate_value_with_model_field(field=field, value=value, values=values, loc=loc)
@@ -337,7 +317,6 @@ def solve_dependencies(
 ):
 	values: Dict[str, Any] = {}
 	errors: List[Any] = []
-	print("???????? In solve_dependencies")
 	if response is None:
 		response = WerkzeugResponse()
 		if "content-length" in response.headers:
@@ -346,14 +325,10 @@ def solve_dependencies(
 		response.status_code = 200  # Default to OK status
 
 	request_query_params = QueryParams(frappe.request.query_string).to_dict()
-	print("> Dependant Query Values:", dependant.query_params)
-	print("> Request Query Params:", request_query_params)
 
 	query_values, query_errors = request_params_to_args(dependant.query_params, request_query_params)
 	values.update(query_values)
 	errors.extend(query_errors)
-	print("> Query Values:", query_values)
-	print("> Query Errors:", query_errors)
 
 	return SolvedDependency(
 		values=values,
@@ -368,6 +343,7 @@ class APIRoute:
 		path: str,
 		func: Callable,
 		*,
+		exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]],
 		methods: Optional[Union[Set[str], List[str]]] = None,
 		response_model: Any = None,
 		status_code: Optional[int] = None,
@@ -389,6 +365,7 @@ class APIRoute:
 		self.tags = tags
 		self.summary = summary
 		self.include_in_schema = include_in_schema
+		self.exception_handlers = exception_handlers
 
 	def get_typed_signature(self) -> inspect.Signature:
 		signature = inspect.signature(self.func)
@@ -407,7 +384,6 @@ class APIRoute:
 
 	def handle_request(self, *args, **kwargs):
 		try:
-			# TODO: Here we will do all the parsing, validation, and serialization ...etc
 			endpoint_signature = self.get_typed_signature()
 			signature_params = endpoint_signature.parameters
 			dependant = Dependant(
@@ -417,7 +393,6 @@ class APIRoute:
 				security_scopes=None,
 				use_cache=True,
 			)
-			print("> Dependant:", dependant)
 
 			for param_name, param in signature_params.items():
 				param_details = analyze_param(
@@ -426,15 +401,12 @@ class APIRoute:
 				assert param_details.field is not None
 				add_param_to_fields(field=param_details.field, dependant=dependant)
 
-			print("> Dependant After Adding Params:", dependant)
-
 			assert dependant.call is not None, "dependant.call must be a function"
 
 			# TODO: Validation and serialization
 			errors: List[Any] = []
-			request = frappe.request
 			# werkzeug.local.LocalProxy
-			print("> Request:", request, type(request))
+			request = frappe.request
 			solved_result = solve_dependencies(dependant=dependant, request=request)
 			errors = solved_result.errors
 			body = None
@@ -462,10 +434,16 @@ class APIRoute:
 			return WerkzeugResponse(
 				response_content, status=self.status_code or 200, mimetype="application/json"
 			)
+		except HTTPException as exc:
+			return http_exception_handler(request, exc)
+		except RequestValidationError as exc:
+			return request_validation_exception_handler(request, exc)
 		except Exception as exc:
-			error_response = {"detail": str(exc)}
-			response_body = json.dumps(error_response)
-			return WerkzeugResponse(response_body, status=500, mimetype="application/json")
+			# Check if there's a custom handler for this exception type
+			for exc_type, handler in self.exception_handlers.items():
+				if isinstance(exc, exc_type):
+					return handler(request, exc)
+			raise exc
 
 
 class APIRouter:
@@ -473,6 +451,9 @@ class APIRouter:
 		self,
 		prefix: str = "/api/method",
 		default_response_class: Type[WerkzeugResponse] = Default(WerkzeugResponse),
+		exception_handlers: Dict[
+			Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]
+		] = {},
 	):
 		if prefix:
 			assert prefix.startswith("/"), "A path prefix must start with '/'"
@@ -482,6 +463,7 @@ class APIRouter:
 		self.prefix = prefix
 		self.default_response_class = default_response_class
 		self.routes: List[APIRoute] = []
+		self.exception_handlers = exception_handlers
 
 	def add_api_route(
 		self,
@@ -499,6 +481,7 @@ class APIRouter:
 		route = APIRoute(
 			path,
 			func,
+			exception_handlers=self.exception_handlers,
 			methods=methods,
 			response_model=response_model,
 			status_code=status_code,
