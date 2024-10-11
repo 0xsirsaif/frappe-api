@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from frappeapi.routing import APIRouter
 from frappeapi.utils import Default
@@ -20,7 +20,11 @@ class FrappeAPI:
 		self.version = version
 		self.servers = servers
 
-		self.router = APIRouter(prefix="/api/method")
+		self.exception_handlers = {}
+		self.router = APIRouter(
+			prefix="/api/method",
+			exception_handlers=self.exception_handlers,
+		)
 
 	def get(
 		self,
@@ -154,3 +158,16 @@ class FrappeAPI:
 			summary=summary,
 			include_in_schema=include_in_schema,
 		)
+
+	def exception_handler(self, exc: Exception):
+		"""
+		Add an exception handler to the application.
+
+		Exception handlers are used to handle exceptions that are raised during the processing of a request.
+		"""
+
+		def decorator(handler: Callable):
+			self.exception_handlers[exc] = handler
+			return handler
+
+		return decorator
