@@ -25,7 +25,6 @@ class FrappeAPI:
 			{} if exception_handlers is None else exception_handlers
 		)
 		self.router = APIRouter(
-			prefix="/api/method",
 			exception_handlers=self.exception_handlers,
 		)
 

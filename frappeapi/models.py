@@ -1,8 +1,8 @@
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from openapi_pydantic_v2 import SecurityRequirement
+from pydantic import TypeAdapter, ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined, PydanticUndefinedType as PydanticUndefinedType
 from typing_extensions import Annotated, Literal
@@ -19,43 +19,10 @@ class BaseConfig:
 	pass
 
 
-class BaseModelWithConfig(BaseModel):
-	model_config = {"extra": "allow"}
-
-
-class SecuritySchemeType(Enum):
-	apiKey = "apiKey"  # noqa: N815
-	http = "http"
-	oauth2 = "oauth2"
-	openIdConnect = "openIdConnect"  # noqa: N815
-
-
-class SecurityBaseModel(BaseModelWithConfig):
-	type_: SecuritySchemeType = Field(alias="type")
-	description: Optional[str] = None
-
-
-class SecurityBase:
-	model: SecurityBaseModel
-	scheme_name: str
-
-
-@dataclass
-class SecurityRequirement:
-	security_scheme: SecurityBase
-	scopes: Optional[Sequence[str]] = None
-
-
-def _normalize_errors(errors: Sequence[Any]) -> List[Dict[str, Any]]:
-	return errors  # type: ignore[return-value]
-
-
 def _regenerate_error_with_loc(
 	*, errors: Sequence[Any], loc_prefix: Tuple[Union[str, int], ...]
 ) -> List[Dict[str, Any]]:
-	updated_loc_errors: List[Any] = [
-		{**err, "loc": loc_prefix + err.get("loc", ())} for err in _normalize_errors(errors)
-	]
+	updated_loc_errors: List[Any] = [{**err, "loc": loc_prefix + err.get("loc", ())} for err in errors]
 
 	return updated_loc_errors
 
