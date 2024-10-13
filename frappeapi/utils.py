@@ -2,13 +2,15 @@ import inspect
 import os
 import types
 from collections import deque
-from copy import deepcopy
+from copy import copy, deepcopy
+from dataclasses import is_dataclass
 from functools import lru_cache
 from typing import Any, Deque, Dict, ForwardRef, FrozenSet, List, Mapping, Sequence, Set, Tuple, Type, Union
 
 from pydantic import BaseModel, ValidationError
 from pydantic._internal._typing_extra import eval_type_lenient as evaluate_forwardref
 from pydantic._internal._utils import lenient_issubclass
+from pydantic.fields import FieldInfo
 from typing_extensions import get_args, get_origin
 
 import frappeapi.params as params
@@ -113,10 +115,12 @@ def is_sequence_field(field: ModelField) -> bool:
 def _get_multidict_value(field: ModelField, values: Mapping[str, Any], alias: Union[str, None] = None) -> Any:
 	alias = alias or field.alias
 
-	if is_sequence_field(field) and isinstance(values, ImmutableMultiDict):
-		value = values.getlist(alias)
-	else:
-		value = values.get(alias, None)
+	value = (
+		values.getlist(alias)
+		if is_sequence_field(field) and isinstance(values, ImmutableMultiDict)
+		else values.get(alias, None)
+	)
+
 	if value is None or (is_sequence_field(field) and len(value) == 0):
 		if field.required:
 			return
@@ -150,3 +154,64 @@ def _validate_value_with_model_field(
 		return None, new_errors
 	else:
 		return v_, []
+
+
+def copy_field_info(*, field_info: FieldInfo, annotation: Any) -> FieldInfo:
+	cls = type(field_info)
+	merged_field_info = cls.from_annotation(annotation)
+	new_field_info = copy(field_info)
+	new_field_info.metadata = merged_field_info.metadata
+	new_field_info.annotation = merged_field_info.annotation
+	return new_field_info
+
+
+def _annotation_is_complex(annotation: Union[Type[Any], None]) -> bool:
+	return (
+		lenient_issubclass(annotation, (BaseModel, Mapping))
+		or _annotation_is_sequence(annotation)
+		or is_dataclass(annotation)
+	)
+
+
+def field_annotation_is_complex(annotation: Union[Type[Any], None]) -> bool:
+	origin = get_origin(annotation)
+	if origin is Union or origin is UnionType:
+		return any(field_annotation_is_complex(arg) for arg in get_args(annotation))
+
+	return (
+		_annotation_is_complex(annotation)
+		or _annotation_is_complex(origin)
+		or hasattr(origin, "__pydantic_core_schema__")
+		or hasattr(origin, "__get_pydantic_core_schema__")
+	)
+
+
+def field_annotation_is_scalar(annotation: Any) -> bool:
+	# handle Ellipsis here to make tuple[int, ...] work nicely
+	return annotation is Ellipsis or not field_annotation_is_complex(annotation)
+
+
+def is_scalar_field(field: ModelField) -> bool:
+	from frappeapi import params
+
+	return field_annotation_is_scalar(field.field_info.annotation) and not isinstance(field.field_info, params.Body)
+
+
+def field_annotation_is_scalar_sequence(annotation: Union[Type[Any], None]) -> bool:
+	origin = get_origin(annotation)
+	if origin is Union or origin is UnionType:
+		at_least_one_scalar_sequence = False
+		for arg in get_args(annotation):
+			if field_annotation_is_scalar_sequence(arg):
+				at_least_one_scalar_sequence = True
+				continue
+			elif not field_annotation_is_scalar(arg):
+				return False
+		return at_least_one_scalar_sequence
+	return field_annotation_is_sequence(annotation) and all(
+		field_annotation_is_scalar(sub_annotation) for sub_annotation in get_args(annotation)
+	)
+
+
+def is_scalar_sequence_field(field: ModelField) -> bool:
+	return field_annotation_is_scalar_sequence(field.field_info.annotation)
