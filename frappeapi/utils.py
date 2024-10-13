@@ -10,9 +10,9 @@ from pydantic import BaseModel, ValidationError
 from pydantic._internal._typing_extra import eval_type_lenient as evaluate_forwardref
 from pydantic._internal._utils import lenient_issubclass
 from typing_extensions import get_args, get_origin
-from werkzeug.datastructures import ImmutableMultiDict
 
 import frappeapi.params as params
+from frappeapi.datastructures import ImmutableMultiDict
 from frappeapi.exceptions import ErrorWrapper
 from frappeapi.models import Dependant, ModelField, _regenerate_error_with_loc
 
@@ -112,7 +112,8 @@ def is_sequence_field(field: ModelField) -> bool:
 
 def _get_multidict_value(field: ModelField, values: Mapping[str, Any], alias: Union[str, None] = None) -> Any:
 	alias = alias or field.alias
-	if is_sequence_field(field) and isinstance(values, (ImmutableMultiDict)):
+
+	if is_sequence_field(field) and isinstance(values, ImmutableMultiDict):
 		value = values.getlist(alias)
 	else:
 		value = values.get(alias, None)

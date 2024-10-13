@@ -39,7 +39,7 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP",
 ]
 dependencies = [
-    "pydantic==2.6.4,<3.0.0",
+    "pydantic>=2.6.4,<3.0.0",
     "typing-extensions>=4.10.0",
     "openapi-pydantic-v2>=0.1.0,<2.0.0",
 ]

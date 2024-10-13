@@ -60,7 +60,6 @@ from frappeapi.models import (
 	Dependant,
 	ModelField,
 	SolvedDependency,
-	_normalize_errors,
 )
 from frappeapi.utils import (
 	Default,
@@ -165,7 +164,8 @@ def request_params_to_args(
 	if not fields:
 		return values, errors
 
-	# If there is only one field, and it is a Pydantic BaseModel, then we need to extract all the fields from the model
+	# If there is only one field, and it is a Pydantic BaseModel,
+	# then we need to extract all the fields from the model
 	first_field = fields[0]
 	fields_to_extract = fields
 	single_not_embedded_field = False
@@ -201,6 +201,7 @@ def request_params_to_args(
 
 	for field in fields:
 		value = _get_multidict_value(field, received_params)
+
 		field_info = field.field_info
 		assert isinstance(field_info, params.Param), "Params must be subclasses of Param"
 		loc = (field_info.in_.value, field.alias)
@@ -225,7 +226,7 @@ def solve_dependencies(
 
 		response.status_code = 200  # Default to OK status
 
-	request_query_params = QueryParams(frappe.request.query_string).to_dict()
+	request_query_params = QueryParams(frappe.request.query_string)
 
 	query_values, query_errors = request_params_to_args(dependant.query_params, request_query_params)
 	values.update(query_values)
@@ -241,7 +242,6 @@ def solve_dependencies(
 class APIRoute:
 	def __init__(
 		self,
-		path: str,
 		func: Callable,
 		*,
 		exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]],
@@ -253,8 +253,9 @@ class APIRoute:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 	):
-		self.path = path
 		self.func = func
+		self.prefix = "/api/method"
+		self.path = self.prefix + extract_endpoint_relative_path(self.func) + "." + self.func.__name__
 
 		if methods is None:
 			methods = ["GET"]
@@ -269,6 +270,9 @@ class APIRoute:
 		self.exception_handlers = exception_handlers
 
 	def get_typed_signature(self) -> inspect.Signature:
+		"""
+		Generate a typed signature (parameters) for the endpoint function.
+		"""
 		signature = inspect.signature(self.func)
 		globalns = getattr(self.func, "__globals__", {})
 		typed_params = [
@@ -284,7 +288,6 @@ class APIRoute:
 		return typed_signature
 
 	def handle_request(self, *args, **kwargs):
-		# werkzeug.local.LocalProxy
 		request = frappe.request
 		try:
 			endpoint_signature = self.get_typed_signature()
@@ -314,7 +317,7 @@ class APIRoute:
 			if not errors:
 				pass
 			else:
-				validation_error = RequestValidationError(_normalize_errors(errors), body=body)
+				validation_error = RequestValidationError(errors, body=body)
 				raise validation_error
 
 			result = self.func(**solved_result.values)
@@ -345,18 +348,11 @@ class APIRoute:
 class APIRouter:
 	def __init__(
 		self,
-		prefix: str = "/api/method",
 		default_response_class: Type[WerkzeugResponse] = Default(WerkzeugResponse),
 		exception_handlers: Dict[
 			Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]
 		] = None,
 	):
-		if prefix:
-			assert prefix.startswith("/"), "A path prefix must start with '/'"
-			assert not prefix.endswith(
-				"/"
-			), "A path prefix must not end with '/', as the routes will start with '/'"
-		self.prefix = prefix
 		self.default_response_class = default_response_class
 		self.routes: List[APIRoute] = []
 		self.exception_handlers = exception_handlers
@@ -373,9 +369,7 @@ class APIRouter:
 		include_in_schema: bool = True,
 		methods: Optional[Union[Set[str], List[str]]] = None,
 	):
-		path = self.prefix + extract_endpoint_relative_path(func) + "." + func.__name__
 		route = APIRoute(
-			path,
 			func,
 			exception_handlers=self.exception_handlers,
 			methods=methods,
