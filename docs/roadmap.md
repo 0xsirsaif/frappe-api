@@ -15,17 +15,19 @@
 
 ## Query Parameter Features
 
-- [ ] Automatic query parameter parsing/conversion based on type hints
-- [ ] Required query parameters `needy: str`
-- [ ] Optional query parameters with default values `skip: int = 0`
-- [ ] Optional query parameters without default values `limit: Union[int, None] = None`
+- [x] Automatic query parameter parsing/conversion based on type hints
+- [x] Required query parameters `needy: str`
+- [x] Optional query parameters with default values `skip: int = 0`
+- [x] Optional query parameters without default values `limit: Union[int, None] = None`
 - [ ] Automatic Documentation generation for query parameters
-- [ ] Enum support for query parameters [path parameters - predefined values](https://fastapi.tiangolo.com/tutorial/path-params/#predefined-values)
+- [x] Enum support for query parameters [path parameters - predefined values](https://fastapi.tiangolo.com/tutorial/path-params/#predefined-values)
 - [ ] Additional information and validation for query parameters
-
-  - [ ] String validations `min_length`, `max_length`, `regex pattern`
-  - [ ] Numeric validations `gt`, `ge`, `lt`, `le`
-  - [ ] Metadata `title`, `description`, `deprecated`
+  
+  - [x] String validations `min_length`, `max_length`, `regex pattern`
+  - [x] Numeric validations `gt`, `ge`, `lt`, `le`
+  - [x] Metadata `title`, `description`, `deprecated`
+  - [x] Additional Validation and information with `Annotated`
+  - [ ] Ellipsis as required `q: Annotated[str, Query(...)]`
 
 - [ ] to be continued...
 
@@ -35,3 +37,7 @@
 - [PR #22300](https://github.com/frappe/frappe/pull/22300): Enhancing `frappe.whitelist()` functionality
 - [PR #19029](https://github.com/frappe/frappe/pull/19029): Efforts to improve type safety in Frappe
 - [Issue #14905](https://github.com/frappe/frappe/issues/14905): Discussion on improving API documentation
+
+## To be determined
+
+- [ ] `tags: list[str]` parsed as Query or Body? [see the hint here](https://fastapi.tiangolo.com/tutorial/query-params-str-validations/?h=annotated#query-parameter-list-multiple-values)

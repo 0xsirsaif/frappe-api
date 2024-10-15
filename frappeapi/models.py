@@ -1,16 +1,17 @@
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Annotated, Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from openapi_pydantic_v2 import SecurityRequirement
 from pydantic import TypeAdapter, ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined, PydanticUndefinedType as PydanticUndefinedType
-from typing_extensions import Annotated, Literal
+from typing_extensions import Literal
 from werkzeug.wrappers import Response as WerkzeugResponse
 
 Required = PydanticUndefined
 Undefined = PydanticUndefined
 UndefinedType = PydanticUndefinedType
+Validator = Any
 Validator = Any
 IncEx = Union[Set[int], Set[str], Dict[int, Any], Dict[str, Any]]
 
@@ -51,9 +52,7 @@ class ModelField:
 		return self.field_info.annotation
 
 	def __post_init__(self) -> None:
-		self._type_adapter: TypeAdapter[Any] = TypeAdapter(
-			Annotated[self.field_info.annotation, self.field_info]
-		)
+		self._type_adapter: TypeAdapter[Any] = TypeAdapter(Annotated[self.field_info.annotation, self.field_info])
 
 	def get_default(self) -> Any:
 		if self.field_info.is_required():

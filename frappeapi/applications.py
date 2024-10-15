@@ -1,6 +1,9 @@
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 
+from werkzeug.wrappers import Response as WerkzeugResponse
+
+from frappeapi.responses import JSONResponse
 from frappeapi.routing import APIRouter
 from frappeapi.utils import Default
 
@@ -14,6 +17,7 @@ class FrappeAPI:
 		version: str = "0.1.0",
 		servers: Optional[List[Dict[str, Union[str, Any]]]] = None,
 		exception_handlers: Optional[Dict[Type[Exception], Callable]] = None,
+		default_response_class: Type[WerkzeugResponse] = Default(JSONResponse),
 	):
 		self.title = title
 		self.summary = summary
@@ -25,7 +29,7 @@ class FrappeAPI:
 			{} if exception_handlers is None else exception_handlers
 		)
 		self.router = APIRouter(
-			exception_handlers=self.exception_handlers,
+			exception_handlers=self.exception_handlers, default_response_class=default_response_class
 		)
 
 	def get(
@@ -37,6 +41,7 @@ class FrappeAPI:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
 	):
 		return self.router.get(
 			response_model=response_model,
@@ -45,6 +50,7 @@ class FrappeAPI:
 			tags=tags,
 			summary=summary,
 			include_in_schema=include_in_schema,
+			response_class=response_class,
 		)
 
 	def post(
@@ -56,6 +62,7 @@ class FrappeAPI:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
 	):
 		return self.router.post(
 			response_model=response_model,
@@ -64,6 +71,7 @@ class FrappeAPI:
 			tags=tags,
 			summary=summary,
 			include_in_schema=include_in_schema,
+			response_class=response_class,
 		)
 
 	def put(
@@ -75,6 +83,7 @@ class FrappeAPI:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
 	):
 		return self.router.put(
 			response_model=response_model,
@@ -83,6 +92,7 @@ class FrappeAPI:
 			tags=tags,
 			summary=summary,
 			include_in_schema=include_in_schema,
+			response_class=response_class,
 		)
 
 	def delete(
@@ -94,6 +104,7 @@ class FrappeAPI:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
 	):
 		return self.router.delete(
 			response_model=response_model,
@@ -102,6 +113,7 @@ class FrappeAPI:
 			tags=tags,
 			summary=summary,
 			include_in_schema=include_in_schema,
+			response_class=response_class,
 		)
 
 	def patch(
@@ -113,6 +125,7 @@ class FrappeAPI:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
 	):
 		return self.router.patch(
 			response_model=response_model,
@@ -121,6 +134,7 @@ class FrappeAPI:
 			tags=tags,
 			summary=summary,
 			include_in_schema=include_in_schema,
+			response_class=response_class,
 		)
 
 	def options(
@@ -132,6 +146,7 @@ class FrappeAPI:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
 	):
 		return self.router.options(
 			response_model=response_model,
@@ -140,6 +155,7 @@ class FrappeAPI:
 			tags=tags,
 			summary=summary,
 			include_in_schema=include_in_schema,
+			response_class=response_class,
 		)
 
 	def head(
@@ -151,6 +167,7 @@ class FrappeAPI:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
 	):
 		return self.router.head(
 			response_model=response_model,
@@ -159,6 +176,7 @@ class FrappeAPI:
 			tags=tags,
 			summary=summary,
 			include_in_schema=include_in_schema,
+			response_class=response_class,
 		)
 
 	def exception_handler(self, exc: Exception):

@@ -1,10 +1,12 @@
+import dataclasses
 import inspect
-import json
+import re
 import types
 from copy import copy
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
+	Annotated,
 	Any,
 	Callable,
 	Dict,
@@ -18,7 +20,7 @@ from typing import (
 	Union,
 )
 
-from typing_extensions import Annotated, Literal, get_args, get_origin
+from typing_extensions import Literal, get_args, get_origin
 
 try:
 	import frappe
@@ -46,7 +48,6 @@ except ImportError:
 from pydantic import BaseModel, PydanticSchemaGenerationError
 from pydantic._internal._utils import lenient_issubclass
 from pydantic.fields import FieldInfo
-from pydantic_core import PydanticUndefined, PydanticUndefinedType
 from werkzeug.wrappers import (
 	Request as WerkzeugRequest,
 	Response as WerkzeugResponse,
@@ -54,33 +55,145 @@ from werkzeug.wrappers import (
 
 from frappeapi import params
 from frappeapi.datastructures import QueryParams
+from frappeapi.encoders import jsonable_encoder
 from frappeapi.exception_handler import http_exception_handler, request_validation_exception_handler
-from frappeapi.exceptions import FrappeAPIError, HTTPException, RequestValidationError
+from frappeapi.exceptions import FrappeAPIError, HTTPException, RequestValidationError, ResponseValidationError
 from frappeapi.models import (
 	BaseConfig,
 	Dependant,
+	IncEx,
 	ModelField,
+	Required,
 	SolvedDependency,
+	Undefined,
+	UndefinedType,
+	Validator,
 )
 from frappeapi.params import PYDANTIC_V2
+from frappeapi.responses import JSONResponse
 from frappeapi.utils import (
 	Default,
+	DefaultPlaceholder,
+	DefaultType,
+	_get_model_config,
 	_get_multidict_value,
+	_model_dump,
 	_validate_value_with_model_field,
 	add_param_to_fields,
 	copy_field_info,
 	extract_endpoint_relative_path,
 	get_cached_model_fields,
 	get_typed_annotation,
+	is_body_allowed_for_status_code,
 	is_scalar_field,
 	is_scalar_sequence_field,
 )
 
-Required = PydanticUndefined
-Undefined = PydanticUndefined
-UndefinedType = PydanticUndefinedType
-Validator = Any
 UnionType = getattr(types, "UnionType", Union)
+
+
+def _prepare_response_content(
+	res: Any,
+	*,
+	exclude_unset: bool,
+	exclude_defaults: bool = False,
+	exclude_none: bool = False,
+) -> Any:
+	if isinstance(res, BaseModel):
+		read_with_orm_mode = getattr(_get_model_config(res), "read_with_orm_mode", None)
+		if read_with_orm_mode:
+			# Let from_orm extract the data from this model instead of converting
+			# it now to a dict.
+			# Otherwise, there's no way to extract lazy data that requires attribute
+			# access instead of dict iteration, e.g. lazy relationships.
+			return res
+		return _model_dump(
+			res,
+			by_alias=True,
+			exclude_unset=exclude_unset,
+			exclude_defaults=exclude_defaults,
+			exclude_none=exclude_none,
+		)
+	elif isinstance(res, list):
+		return [
+			_prepare_response_content(
+				item,
+				exclude_unset=exclude_unset,
+				exclude_defaults=exclude_defaults,
+				exclude_none=exclude_none,
+			)
+			for item in res
+		]
+	elif isinstance(res, dict):
+		return {
+			k: _prepare_response_content(
+				v,
+				exclude_unset=exclude_unset,
+				exclude_defaults=exclude_defaults,
+				exclude_none=exclude_none,
+			)
+			for k, v in res.items()
+		}
+	elif dataclasses.is_dataclass(res):
+		return dataclasses.asdict(res)
+
+	return res
+
+
+def serialize_response(
+	*,
+	field: Optional[ModelField] = None,
+	response_content: Any,
+	include: Optional[IncEx] = None,
+	exclude: Optional[IncEx] = None,
+	by_alias: bool = True,
+	exclude_unset: bool = False,
+	exclude_defaults: bool = False,
+	exclude_none: bool = False,
+) -> Any:
+	if field:
+		errors = []
+		if not hasattr(field, "serialize"):
+			# pydantic v1
+			response_content = _prepare_response_content(
+				response_content,
+				exclude_unset=exclude_unset,
+				exclude_defaults=exclude_defaults,
+				exclude_none=exclude_none,
+			)
+
+		value, errors_ = field.validate(response_content, {}, loc=("response",))
+
+		if isinstance(errors_, list):
+			errors.extend(errors_)
+		elif errors_:
+			errors.append(errors_)
+
+		if errors:
+			raise ResponseValidationError(errors=errors, body=response_content)
+
+		if hasattr(field, "serialize"):
+			return field.serialize(
+				value,
+				include=include,
+				exclude=exclude,
+				by_alias=by_alias,
+				exclude_unset=exclude_unset,
+				exclude_defaults=exclude_defaults,
+				exclude_none=exclude_none,
+			)
+
+		return jsonable_encoder(
+			value,
+			include=include,
+			exclude=exclude,
+			by_alias=by_alias,
+			exclude_unset=exclude_unset,
+			exclude_defaults=exclude_defaults,
+			exclude_none=exclude_none,
+		)
+	else:
+		return jsonable_encoder(response_content)
 
 
 def create_model_field(
@@ -238,7 +351,7 @@ def analyze_param(
 		if PYDANTIC_V2:
 			field_info.annotation = type_annotation
 
-	# Get Depends from type annotation
+	# Get `Depends` from type annotation
 	if depends is not None and depends.dependency is None:
 		# Copy `depends` before mutating it
 		depends = copy(depends)
@@ -347,7 +460,7 @@ def parse_and_validate_request(
 		if "content-length" in response.headers:
 			del response.headers["content-length"]
 
-		response.status_code = 200  # Default to OK status
+		response.status = 200  # Default to OK status
 
 	request_query_params = QueryParams(frappe.request.query_string)
 
@@ -408,6 +521,43 @@ def build_dependant(
 	return dependant
 
 
+def generate_unique_id(route: "APIRoute") -> str:
+	operation_id = f"{route.name}{route.path}"
+	operation_id = re.sub(r"\W", "_", operation_id)
+	assert route.methods
+	operation_id = f"{operation_id}_{list(route.methods)[0].lower()}"
+	return operation_id
+
+
+def get_value_or_default(
+	first_item: Union[DefaultPlaceholder, DefaultType],
+	*extra_items: Union[DefaultPlaceholder, DefaultType],
+) -> Union[DefaultPlaceholder, DefaultType]:
+	"""
+	Pass items or `DefaultPlaceholder`s by descending priority.
+
+	The first one to _not_ be a `DefaultPlaceholder` will be returned.
+
+	Otherwise, the first item (a `DefaultPlaceholder`) will be returned.
+	"""
+	items = (first_item,) + extra_items
+	for item in items:
+		if not isinstance(item, DefaultPlaceholder):
+			return item
+	return first_item
+
+
+def get_typed_return_annotation(call: Callable[..., Any]) -> Any:
+	signature = inspect.signature(call)
+	annotation = signature.return_annotation
+
+	if annotation is inspect.Signature.empty:
+		return None
+
+	globalns = getattr(call, "__globals__", {})
+	return get_typed_annotation(annotation, globalns)
+
+
 class APIRoute:
 	def __init__(
 		self,
@@ -415,28 +565,74 @@ class APIRoute:
 		*,
 		exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]],
 		methods: Optional[Union[Set[str], List[str]]] = None,
-		response_model: Any = None,
+		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
 		description: Optional[str] = None,
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
+		response_model_include: Optional[IncEx] = None,
+		response_model_exclude: Optional[IncEx] = None,
+		response_model_by_alias: bool = True,
+		response_model_exclude_unset: bool = False,
+		response_model_exclude_defaults: bool = False,
+		response_model_exclude_none: bool = False,
 	):
 		self.func = func
 		self.prefix = "/api/method"
 		self.path = self.prefix + extract_endpoint_relative_path(self.func) + "." + self.func.__name__
+		self.name = getattr(self.func, "__name__", None)
 
 		if methods is None:
 			methods = ["GET"]
 		self.methods: Set[str] = {method.upper() for method in methods}
 
+		if isinstance(response_model, DefaultPlaceholder):
+			return_annotation = get_typed_return_annotation(self.func)
+			response_model = None if lenient_issubclass(return_annotation, WerkzeugResponse) else return_annotation
+
 		self.response_model = response_model
+
 		self.status_code = status_code
-		self.description = description
+
+		self.description = description or inspect.cleandoc(self.func.__doc__ or "")
+		# if a "form feed" character (page break) is found in the description text,
+		# truncate description text to the content preceding the first "form feed"
+		self.description = self.description.split("\f")[0].strip()
+
+		self.response_class = response_class
+
 		self.tags = tags
 		self.summary = summary
+		self.unique_id = generate_unique_id(self)
+
 		self.include_in_schema = include_in_schema
+		self.response_model_include = response_model_include
+		self.response_model_exclude = response_model_exclude
+		self.response_model_by_alias = response_model_by_alias
+		self.response_model_exclude_unset = response_model_exclude_unset
+		self.response_model_exclude_defaults = response_model_exclude_defaults
+		self.response_model_exclude_none = response_model_exclude_none
+
 		self.exception_handlers = exception_handlers
+
+		if self.response_model:
+			assert is_body_allowed_for_status_code(
+				status_code
+			), f"Status code {status_code} must not have a response body"
+
+			response_name = "Response_" + self.unique_id
+
+			self.response_field = create_model_field(
+				name=response_name,
+				type_=self.response_model,
+				mode="serialization",
+			)
+			self.secure_cloned_response_field = self.response_field
+		else:
+			self.response_field = None  # type: ignore
+			self.secure_cloned_response_field = None
 
 	def handle_request(self, *args, **kwargs):
 		request = frappe.request
@@ -449,16 +645,57 @@ class APIRoute:
 			errors = solved_result.errors
 			body = None
 			if not errors:
-				pass
+				request_data = solved_result.values
+				raw_response = self.func(**request_data)
+
+				if isinstance(raw_response, WerkzeugResponse):
+					# if raw_response.background is None:
+					# 	raw_response.background = solved_result.background_tasks
+					response = raw_response
+				else:
+					# response_args: Dict[str, Any] = {"background": solved_result.background_tasks}
+					response_args: Dict[str, Any] = {}
+					# If status_code was set, use it, otherwise use the default from the
+					# # response class, in the case of redirect it's 307
+					current_status_code = self.status_code if self.status_code else solved_result.response.status_code
+					if current_status_code is not None:
+						response_args["status"] = current_status_code
+					if solved_result.response.status_code:
+						response_args["status"] = solved_result.response.status_code
+
+					content = serialize_response(
+						field=self.secure_cloned_response_field,
+						response_content=raw_response,
+						include=self.response_model_include,
+						exclude=self.response_model_exclude,
+						by_alias=self.response_model_by_alias,
+						exclude_unset=self.response_model_exclude_unset,
+						exclude_defaults=self.response_model_exclude_defaults,
+						exclude_none=self.response_model_exclude_none,
+					)
+
+					if isinstance(self.response_class, DefaultPlaceholder):
+						actual_response_class: Type[WerkzeugResponse] = self.response_class.value
+					else:
+						actual_response_class = self.response_class
+
+					response = actual_response_class(content, **response_args)
+					if not is_body_allowed_for_status_code(response.status_code):
+						response.body = b""
+
+					# Only update headers that are not already set, preserving the Content-Type
+					for key, value in solved_result.response.headers.items():
+						if key.lower() != "content-type":
+							response.headers[key] = value
+
+					if response is None:
+						raise FrappeAPIError("No response object was returned.")
+
+					return response
 			else:
 				validation_error = RequestValidationError(errors, body=body)
 				raise validation_error
 
-			result = self.func(**solved_result.values)
-
-			# Convert the result to JSON and return a response
-			response_content = json.dumps(result)
-			return WerkzeugResponse(response_content, status=self.status_code or 200, mimetype="application/json")
 		except HTTPException as exc:
 			if self.exception_handlers.get(HTTPException):
 				return self.exception_handlers[HTTPException](request, exc)
@@ -498,7 +735,9 @@ class APIRouter:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		methods: Optional[Union[Set[str], List[str]]] = None,
+		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
 	):
+		current_response_class = get_value_or_default(response_class, self.default_response_class)
 		route = APIRoute(
 			func,
 			exception_handlers=self.exception_handlers,
@@ -509,6 +748,7 @@ class APIRouter:
 			tags=tags,
 			summary=summary,
 			include_in_schema=include_in_schema,
+			response_class=current_response_class,
 		)
 		self.routes.append(route)
 		return route
@@ -523,6 +763,7 @@ class APIRouter:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		methods: Optional[List[str]] = None,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
 	):
 		def decorator(func: Callable):
 			@whitelist(methods=methods)
@@ -536,6 +777,7 @@ class APIRouter:
 					summary=summary,
 					include_in_schema=include_in_schema,
 					methods=methods,
+					response_class=response_class,
 				)
 				return route.handle_request(*args, **kwargs)
 
@@ -552,6 +794,7 @@ class APIRouter:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
 	):
 		return self.api_route(
 			methods=["GET"],
@@ -561,6 +804,7 @@ class APIRouter:
 			tags=tags,
 			summary=summary,
 			include_in_schema=include_in_schema,
+			response_class=response_class,
 		)
 
 	def post(
@@ -572,6 +816,7 @@ class APIRouter:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
 	):
 		pass
 
@@ -584,6 +829,7 @@ class APIRouter:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
 	):
 		pass
 
@@ -596,6 +842,7 @@ class APIRouter:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
 	):
 		pass
 
@@ -608,6 +855,7 @@ class APIRouter:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
 	):
 		pass
 
@@ -620,6 +868,7 @@ class APIRouter:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
 	):
 		pass
 
@@ -632,5 +881,6 @@ class APIRouter:
 		tags: Optional[List[Union[str, Enum]]] = None,
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
+		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
 	):
 		pass
