@@ -5,13 +5,13 @@ from collections import deque
 from copy import copy, deepcopy
 from dataclasses import is_dataclass
 from functools import lru_cache
-from typing import Any, Deque, Dict, ForwardRef, FrozenSet, List, Mapping, Sequence, Set, Tuple, Type, Union
+from typing import Any, Deque, Dict, ForwardRef, FrozenSet, List, Mapping, Sequence, Set, Tuple, Type, TypeVar, Union
 
 from pydantic import BaseModel, ValidationError
 from pydantic._internal._typing_extra import eval_type_lenient as evaluate_forwardref
 from pydantic._internal._utils import lenient_issubclass
 from pydantic.fields import FieldInfo
-from typing_extensions import get_args, get_origin
+from typing_extensions import Literal, get_args, get_origin
 
 import frappeapi.params as params
 from frappeapi.datastructures import ImmutableMultiDict
@@ -34,6 +34,8 @@ sequence_annotation_to_type = {
 
 sequence_types = tuple(sequence_annotation_to_type.keys())
 UnionType = getattr(types, "UnionType", Union)
+
+DefaultType = TypeVar("DefaultType")
 
 
 class DefaultPlaceholder:
@@ -215,3 +217,30 @@ def field_annotation_is_scalar_sequence(annotation: Union[Type[Any], None]) -> b
 
 def is_scalar_sequence_field(field: ModelField) -> bool:
 	return field_annotation_is_scalar_sequence(field.field_info.annotation)
+
+
+def _model_dump(model: BaseModel, mode: Literal["json", "python"] = "json", **kwargs: Any) -> Any:
+	return model.model_dump(mode=mode, **kwargs)
+
+
+def _get_model_config(model: BaseModel) -> Any:
+	return model.model_config
+
+
+def is_body_allowed_for_status_code(status_code: Union[int, str, None]) -> bool:
+	if status_code is None:
+		return True
+
+	# Ref: https://github.com/OAI/OpenAPI-Specification/blob/main/versions/3.1.0.md#patterned-fields-1
+	if status_code in {
+		"default",
+		"1XX",
+		"2XX",
+		"3XX",
+		"4XX",
+		"5XX",
+	}:
+		return True
+
+	current_status_code = int(status_code)
+	return not (current_status_code < 200 or current_status_code in {204, 205, 304})
