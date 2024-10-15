@@ -460,7 +460,7 @@ def parse_and_validate_request(
 		if "content-length" in response.headers:
 			del response.headers["content-length"]
 
-		response.status = 200  # Default to OK status
+		response.status = 200
 
 	request_query_params = QueryParams(frappe.request.query_string)
 
@@ -683,15 +683,14 @@ class APIRoute:
 					if not is_body_allowed_for_status_code(response.status_code):
 						response.body = b""
 
-					# Only update headers that are not already set, preserving the Content-Type
 					for key, value in solved_result.response.headers.items():
-						if key.lower() != "content-type":
-							response.headers[key] = value
+						if key not in response.headers:
+							response.headers.add(key, value)
 
 					if response is None:
 						raise FrappeAPIError("No response object was returned.")
 
-					return response
+				return response
 			else:
 				validation_error = RequestValidationError(errors, body=body)
 				raise validation_error
