@@ -3,3 +3,5 @@
 ruff>=0.5.1
 pre-commit>=3.6.0
 pytest==8.2.2
+mkdocs~=1.6.1
+mkdocs-material~=9.5.36
