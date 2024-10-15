@@ -1,7 +1,10 @@
 import json
-from typing import Any, Mapping, Optional
+from http import HTTPStatus
+from typing import Any, Optional
 
 from werkzeug.wrappers import Response
+
+from frappeapi.encoders import jsonable_encoder
 
 
 class JSONResponse(Response):
@@ -13,44 +16,39 @@ class JSONResponse(Response):
 
 	def __init__(
 		self,
-		content: Any,
-		status: int = 200,
-		headers: Optional[Mapping[str, str]] = None,
-		mimetype: Optional[str] = None,
-		content_type: Optional[str] = None,
-	) -> None:
+		content: Any = None,
+		status: int | str | HTTPStatus | None = None,
+		headers: Optional[dict] = None,
+		media_type: str = "application/json",
+		**kwargs,
+	):
 		"""
 		Initialize the JSONResponse.
 
 		Args:
-			content: The content to be JSON-encoded.
-			status: HTTP status code.
+			response: The content to be JSON-encoded.
+			status_code: HTTP status code.
 			headers: Additional headers to include in the response.
-			mimetype: The mimetype to use. If not provided, uses the default_mimetype.
-			content_type: The content type to use. If provided, overrides mimetype.
+			media_type: The media type to use. If not provided, uses the default_mimetype.
+			content_type: The content type to use. If provided, overrides media_type.
 		"""
-		if content_type is None:
-			content_type = mimetype or self.default_mimetype
+		if content is not None:
+			content = jsonable_encoder(content)
+			content = json.dumps(content)
 
-		# JSON-encode the content
-		json_content = json.dumps(
-			content,
-			ensure_ascii=False,
-			allow_nan=False,
-			indent=None,
-			separators=(",", ":"),
+		super().__init__(
+			response=content, status=status, headers=headers, mimetype=media_type, content_type=media_type, **kwargs
 		)
 
-		super().__init__(json_content, status=status, headers=headers, content_type=content_type)
+	@property
+	def json(self) -> Any:
+		"""Get the JSON-decoded data."""
+		return json.loads(self.get_data(as_text=True))
 
-	def get_data(self, as_text: bool = False) -> bytes:
-		"""
-		Get the response body as bytes or text.
+	def set_json(self, value: Any) -> None:
+		"""Set new JSON data."""
+		encoded_value = jsonable_encoder(value)
+		self.set_data(json.dumps(encoded_value))
 
-		Args:
-			as_text: If True, return the body as a string instead of bytes.
-
-		Returns:
-			The response body as bytes or string.
-		"""
-		return self.response[0] if as_text else self.response[0].encode("utf-8")
+	# Make json a property that can be get and set
+	json = property(json.fget, set_json)
