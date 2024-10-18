@@ -2,9 +2,8 @@ import json
 from http import HTTPStatus
 from typing import Any, Optional
 
+from fastapi.encoders import jsonable_encoder
 from werkzeug.wrappers import Response
-
-from frappeapi.encoders import jsonable_encoder
 
 
 class JSONResponse(Response):

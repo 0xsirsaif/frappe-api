@@ -1,23 +1,31 @@
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Type, Union
 
+from fastapi.datastructures import Default
+from fastapi.params import Depends
 from werkzeug.wrappers import Response as WerkzeugResponse
 
 from frappeapi.responses import JSONResponse
 from frappeapi.routing import APIRouter
-from frappeapi.utils import Default
 
 
 class FrappeAPI:
 	def __init__(
 		self,
-		title: str = "FrappeAPI",
+		title: Optional[str] = None,
 		summary: Optional[str] = None,
-		description: str = "",
-		version: str = "0.1.0",
+		description: Optional[str] = None,
+		version: Optional[str] = None,
 		servers: Optional[List[Dict[str, Union[str, Any]]]] = None,
-		exception_handlers: Optional[Dict[Type[Exception], Callable]] = None,
+		dependencies: Optional[Sequence[Depends]] = None,
 		default_response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		middleware: Optional[Sequence] = None,
+		exception_handlers: Optional[
+			Dict[
+				Union[int, Type[Exception]],
+				Callable[[WerkzeugResponse, Any], WerkzeugResponse],
+			]
+		] = None,
 	):
 		self.title = title
 		self.summary = summary

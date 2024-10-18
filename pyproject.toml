@@ -8,7 +8,7 @@ name = "frappeapi"
 dynamic = ["version"]
 description = "FrappeAPI, FastAPI for Frappe Framework"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 authors = [
     { name = "Muhammad Saif", email = "muhamed.e.saif@gmail.com" },
 ]
@@ -39,9 +39,11 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP",
 ]
 dependencies = [
-    "pydantic>=2.6.4,<3.0.0",
-    "typing-extensions>=4.10.0",
-    "openapi-pydantic-v2>=0.1.0,<2.0.0",
+    "pydantic==2.6.4,<3.0.0",
+    "typing-extensions>=4.12.2",
+    "openapi_pydantic_v2>=0.1.0,<2.0.0",
+    "Werkzeug>=3.0.4",
+    "fastapi~=0.115.2",
 ]
 [project.optional-dependencies]
 dev = [
