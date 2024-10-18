@@ -375,7 +375,7 @@ def analyze_param(
 				is_scalar_field(field) or is_scalar_sequence_field(field) or lenient_issubclass(field.type_, BaseModel)
 			)
 
-	return ParamDetails(type_annotation=type_annotation, field=field)
+	return ParamDetails(type_annotation=type_annotation, depends=None, field=field)
 
 
 def request_params_to_args(
@@ -456,11 +456,7 @@ def parse_and_validate_request(
 	values.update(query_values)
 	errors.extend(query_errors)
 
-	return SolvedDependency(
-		values=values,
-		errors=errors,
-		response=response,
-	)
+	return SolvedDependency(values=values, errors=errors, background_tasks=None, response=response, dependency_cache={})
 
 
 def get_typed_signature(func: Callable[..., Any]) -> inspect.Signature:
@@ -691,6 +687,11 @@ class APIRoute:
 		except RequestValidationError as exc:
 			if self.exception_handlers.get(RequestValidationError):
 				return self.exception_handlers[RequestValidationError](request, exc)
+			else:
+				return request_validation_exception_handler(request, exc)
+		except ResponseValidationError as exc:
+			if self.exception_handlers.get(ResponseValidationError):
+				return self.exception_handlers[ResponseValidationError](request, exc)
 			else:
 				return request_validation_exception_handler(request, exc)
 		except Exception as exc:
