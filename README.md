@@ -8,17 +8,15 @@ This project is currently in beta and not yet ready for production use. Expect c
 
 ## Why?
 
-Despite Frappe >= 15.0.0 pushing towards using type hints for API development and enhancing `frappe.whitelist()`, I'd like to take it a step further. This project aims to:
-
 - Better API design
 - Automatic API documentation
 - Implement response-model-based serialization
 
-And honestly? Why not? Sometimes you just want to build something cool, even if it might be a bit unnecessary. Who knows, it might just make Frappe developers' lives a little easier (or at least more FastAPI-ish). I'm doing it for the love of coding, and of course, for learning. If it helps someone along the way, that's a bonus!
+The goal is to make Building APIs for Frappe more intuitive, type-safe, and self-documenting, building upon Frappe's recent improvements.
 
 ## Roadmap
 
-### Frappe
+### Frappe Versions
 
 - [ ] Frappe V14 support
 - [ ] Frappe V15 support
