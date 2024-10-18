@@ -3,7 +3,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Type, Union
 
 from fastapi.datastructures import Default
 from fastapi.params import Depends
-from werkzeug.wrappers import Response as WerkzeugResponse
+from werkzeug.wrappers import Request as WerkzeugRequest, Response as WerkzeugResponse
 
 from frappeapi.responses import JSONResponse
 from frappeapi.routing import APIRouter
@@ -187,15 +187,15 @@ class FrappeAPI:
 			response_class=response_class,
 		)
 
-	def exception_handler(self, exc: Exception):
+	def exception_handler(self, exc_class: Type[Exception]) -> Callable:
 		"""
 		Add an exception handler to the application.
 
 		Exception handlers are used to handle exceptions that are raised during the processing of a request.
 		"""
 
-		def decorator(handler: Callable):
-			self.exception_handlers[exc] = handler
-			return handler
+		def decorator(func: Callable[[WerkzeugRequest, Exception], WerkzeugResponse]):
+			self.exception_handlers[exc_class] = func
+			return func
 
 		return decorator
