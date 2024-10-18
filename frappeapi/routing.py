@@ -1,9 +1,7 @@
 import dataclasses
 import inspect
 import re
-import types
 from copy import copy
-from dataclasses import dataclass
 from enum import Enum
 from typing import (
 	Annotated,
@@ -45,6 +43,35 @@ except ImportError:
 		return decorator
 
 
+from fastapi import params
+from fastapi._compat import (
+	PYDANTIC_V2,
+	BaseConfig,
+	ModelField,
+	RequiredParam as Required,
+	Undefined,
+	UndefinedType,
+	Validator,
+	_get_model_config,
+	_model_dump,
+	copy_field_info,
+	get_cached_model_fields,
+	is_scalar_field,
+	is_scalar_sequence_field,
+)
+from fastapi.datastructures import Default, DefaultPlaceholder, DefaultType, QueryParams
+from fastapi.dependencies.models import Dependant
+from fastapi.dependencies.utils import (
+	ParamDetails,
+	SolvedDependency,
+	_get_multidict_value,
+	_validate_value_with_model_field,
+	add_param_to_fields,
+	get_typed_annotation,
+)
+from fastapi.encoders import jsonable_encoder
+from fastapi.types import IncEx
+from fastapi.utils import is_body_allowed_for_status_code
 from pydantic import BaseModel, PydanticSchemaGenerationError
 from pydantic._internal._utils import lenient_issubclass
 from pydantic.fields import FieldInfo
@@ -53,43 +80,10 @@ from werkzeug.wrappers import (
 	Response as WerkzeugResponse,
 )
 
-from frappeapi import params
-from frappeapi.datastructures import QueryParams
-from frappeapi.encoders import jsonable_encoder
 from frappeapi.exception_handler import http_exception_handler, request_validation_exception_handler
 from frappeapi.exceptions import FrappeAPIError, HTTPException, RequestValidationError, ResponseValidationError
-from frappeapi.models import (
-	BaseConfig,
-	Dependant,
-	IncEx,
-	ModelField,
-	Required,
-	SolvedDependency,
-	Undefined,
-	UndefinedType,
-	Validator,
-)
-from frappeapi.params import PYDANTIC_V2
 from frappeapi.responses import JSONResponse
-from frappeapi.utils import (
-	Default,
-	DefaultPlaceholder,
-	DefaultType,
-	_get_model_config,
-	_get_multidict_value,
-	_model_dump,
-	_validate_value_with_model_field,
-	add_param_to_fields,
-	copy_field_info,
-	extract_endpoint_relative_path,
-	get_cached_model_fields,
-	get_typed_annotation,
-	is_body_allowed_for_status_code,
-	is_scalar_field,
-	is_scalar_sequence_field,
-)
-
-UnionType = getattr(types, "UnionType", Union)
+from frappeapi.utils import extract_endpoint_relative_path
 
 
 def _prepare_response_content(
@@ -223,12 +217,6 @@ def create_model_field(
 			"parameter response_model=None. Read more: "
 			"https://fastapi.tiangolo.com/tutorial/response-model/"
 		) from None
-
-
-@dataclass
-class ParamDetails:
-	type_annotation: Any
-	field: Optional[ModelField]
 
 
 def analyze_param(
@@ -765,6 +753,8 @@ class APIRouter:
 		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
 	):
 		def decorator(func: Callable):
+			# TODO: Add allow_guest to the decorator
+			# TODO: Validate @has_website_permission
 			@whitelist(methods=methods)
 			def wrapper(*args, **kwargs):
 				route = self.add_api_route(

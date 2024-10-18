@@ -1,9 +1,9 @@
 import json
 
+from fastapi.utils import is_body_allowed_for_status_code
 from werkzeug.wrappers import Request as WerkzeugRequest, Response as WerkzeugResponse
 
 from frappeapi.exceptions import HTTPException, RequestValidationError
-from frappeapi.utils import is_body_allowed_for_status_code
 
 
 def request_validation_exception_handler(request: WerkzeugRequest, exc: RequestValidationError) -> WerkzeugResponse:
