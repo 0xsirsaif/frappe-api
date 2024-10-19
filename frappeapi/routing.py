@@ -80,7 +80,11 @@ from werkzeug.wrappers import (
 	Response as WerkzeugResponse,
 )
 
-from frappeapi.exception_handler import http_exception_handler, request_validation_exception_handler
+from frappeapi.exception_handler import (
+	http_exception_handler,
+	request_validation_exception_handler,
+	response_validation_exception_handler,
+)
 from frappeapi.exceptions import FrappeAPIError, HTTPException, RequestValidationError, ResponseValidationError
 from frappeapi.responses import JSONResponse
 from frappeapi.utils import extract_endpoint_relative_path
@@ -693,7 +697,7 @@ class APIRoute:
 			if self.exception_handlers.get(ResponseValidationError):
 				return self.exception_handlers[ResponseValidationError](request, exc)
 			else:
-				return request_validation_exception_handler(request, exc)
+				return response_validation_exception_handler(request, exc)
 		except Exception as exc:
 			# Check if there's a custom handler for this exception type
 			for exc_type, handler in self.exception_handlers.items():
