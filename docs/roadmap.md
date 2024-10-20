@@ -27,8 +27,10 @@
   - [x] Numeric validations `gt`, `ge`, `lt`, `le`
   - [x] Metadata `title`, `description`, `deprecated`
   - [x] Additional Validation and information with `Annotated`
-  - [ ] Ellipsis as required `q: Annotated[str, Query(...)]`
+  - [x] Ellipsis as required `q: Annotated[str, Query(...)]`
 
+- [ ] App-Level (global) dependencies, that will be available to all endpoints
+- [ ] Endpoint-Level dependencies
 - [ ] to be continued...
 
 ## Related Frappe PRs and Issues
