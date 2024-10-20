@@ -915,7 +915,18 @@ class APIRouter:
 		allow_guest: bool = False,
 		xss_safe: bool = False,
 	):
-		pass
+		return self.api_route(
+			methods=["POST"],
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
+		)
 
 	def put(
 		self,
@@ -931,7 +942,18 @@ class APIRouter:
 		allow_guest: bool = False,
 		xss_safe: bool = False,
 	):
-		pass
+		return self.api_route(
+			methods=["PUT"],
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
+		)
 
 	def delete(
 		self,
@@ -947,7 +969,18 @@ class APIRouter:
 		allow_guest: bool = False,
 		xss_safe: bool = False,
 	):
-		pass
+		return self.api_route(
+			methods=["DELETE"],
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
+		)
 
 	def patch(
 		self,
@@ -963,7 +996,18 @@ class APIRouter:
 		allow_guest: bool = False,
 		xss_safe: bool = False,
 	):
-		pass
+		return self.api_route(
+			methods=["PATCH"],
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
+		)
 
 	def options(
 		self,
@@ -979,7 +1023,18 @@ class APIRouter:
 		allow_guest: bool = False,
 		xss_safe: bool = False,
 	):
-		pass
+		return self.api_route(
+			methods=["OPTIONS"],
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
+		)
 
 	def head(
 		self,
@@ -995,4 +1050,15 @@ class APIRouter:
 		allow_guest: bool = False,
 		xss_safe: bool = False,
 	):
-		pass
+		return self.api_route(
+			methods=["HEAD"],
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
+		)
