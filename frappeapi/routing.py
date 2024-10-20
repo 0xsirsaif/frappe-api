@@ -1,10 +1,7 @@
 import dataclasses
 import inspect
-import re
-from copy import copy
 from enum import Enum, IntEnum
 from typing import (
-	Annotated,
 	Any,
 	Callable,
 	Dict,
@@ -18,7 +15,7 @@ from typing import (
 	Union,
 )
 
-from typing_extensions import Literal, get_args, get_origin
+from typing_extensions import Literal
 
 try:
 	import frappe
@@ -45,39 +42,33 @@ except ImportError:
 
 from fastapi import params
 from fastapi._compat import (
-	PYDANTIC_V2,
 	BaseConfig,
 	ModelField,
-	RequiredParam as Required,
 	Undefined,
 	UndefinedType,
 	Validator,
 	_get_model_config,
 	_model_dump,
-	copy_field_info,
 	get_cached_model_fields,
-	is_scalar_field,
-	is_scalar_sequence_field,
 )
-from fastapi.datastructures import Default, DefaultPlaceholder, DefaultType, QueryParams
+from fastapi.datastructures import Default, DefaultPlaceholder, QueryParams
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import (
-	ParamDetails,
 	SolvedDependency,
 	_get_multidict_value,
 	_should_embed_body_fields,
 	_validate_value_with_model_field,
-	add_param_to_fields,
 	get_body_field,
+	get_dependant,
 	get_flat_dependant,
 	get_parameterless_sub_dependant,
-	get_typed_annotation,
+	get_typed_return_annotation,
 )
 from fastapi.encoders import jsonable_encoder
 from fastapi.openapi.utils import get_openapi
 from fastapi.routing import APIRoute as FastAPIRoute, BaseRoute as FastAPIBaseRoute
 from fastapi.types import IncEx
-from fastapi.utils import is_body_allowed_for_status_code
+from fastapi.utils import generate_unique_id, get_value_or_default, is_body_allowed_for_status_code
 from pydantic import BaseModel, PydanticSchemaGenerationError
 from pydantic._internal._utils import lenient_issubclass
 from pydantic.fields import FieldInfo
@@ -229,165 +220,6 @@ def create_model_field(
 		) from None
 
 
-def analyze_param(
-	*,
-	param_name: str,
-	annotation: Any,
-	value: Any,
-):
-	"""
-	Analyzes a single parameter of an API endpoint, extracting and interpreting
-	various pieces of information to determine how the parameter should be handled.
-
-	Purpose:
-	1. Interpret type annotations and default values of API endpoint parameters.
-	2. Handle special cases like `Annotated` types and `Depends` instances.
-	3. Create appropriate `FieldInfo` objects for parameter validation and documentation.
-	4. Generate `ModelField` instances for use in request parsing and validation.
-
-	Key Concepts:
-	- Type Annotations: Used to specify the expected type of a parameter.
-	- Annotated: A special type that allows attaching metadata to type hints.
-	- FieldInfo: Provides additional information about a field, such as default values, aliases, and validation rules.
-	- Depends: Used for dependency injection in the API.
-	- ModelField: Represents a field in a Pydantic model, used for validation and serialization.
-
-	Function Flow:
-	1. Initialize variables for field_info, depends, and type annotations.
-	2. Check if the parameter uses the `Annotated` type:
-		- If so, extract the base type and any FrappeAPI-specific annotations.
-		- Handle special cases for `FieldInfo` and `Depends` within `Annotated`.
-	3. Process `Depends` instances if present in the default value.
-	4. Handle cases where `FieldInfo` is provided as the default value.
-	5. Assign default values if neither `FieldInfo` nor `Depends` was found.
-	6. Create a `ModelField` instance if `FieldInfo` is present.
-	7. Perform additional validation for `Query` parameters.
-
-	Special Cases:
-	- Annotated with FieldInfo: The function ensures that default values are not set in `Annotated`
-	and copies the `FieldInfo` to avoid mutations.
-	- Depends: The function handles `Depends` instances both in `Annotated` and as default values,
-	ensuring they are not used together.
-	- Query Parameters: Additional assertions are made to ensure query parameters are of the correct type
-	(scalar or scalar sequence).
-
-	Args:
-		param_name (str): The name of the parameter being analyzed.
-		annotation (Any): The type annotation of the parameter.
-		value (Any): The default value of the parameter.
-
-	Returns:
-		ParamDetails: An object containing the resolved type annotation and ModelField (if created).
-
-	Usage Example:
-		from typing import Annotated
-		from frappeapi import Query
-
-		def my_endpoint(param: Annotated[int, Query(gt=0)] = 1):
-			...
-
-		param_details = analyze_param(
-			param_name="param", annotation=my_endpoint.__annotations__["param"], value=1
-		)
-
-	"""
-	field_info = None
-	depends = None
-
-	type_annotation: Any = Any
-	use_annotation: Any = Any
-	if annotation is not inspect.Signature.empty:
-		use_annotation = annotation
-		type_annotation = annotation
-
-	# Extract Annotated info
-	if get_origin(use_annotation) is Annotated:
-		annotated_args = get_args(annotation)
-		type_annotation = annotated_args[0]
-		frappeapi_annotations = [arg for arg in annotated_args[1:] if isinstance(arg, (FieldInfo, params.Depends))]
-		frappeapi_specific_annotations = [
-			arg for arg in frappeapi_annotations if isinstance(arg, (params.Param, params.Body, params.Depends))
-		]
-		if frappeapi_specific_annotations:
-			frappeapi_annotation: Union[FieldInfo, params.Depends, None] = frappeapi_specific_annotations[-1]
-		else:
-			frappeapi_annotation = None
-
-		# Set default for Annotated FieldInfo
-		if isinstance(frappeapi_annotation, FieldInfo):
-			# Copy `field_info` because we mutate `field_info.default` below.
-			field_info = copy_field_info(field_info=frappeapi_annotation, annotation=use_annotation)
-			assert field_info.default is Undefined or field_info.default is Required, (
-				f"`{field_info.__class__.__name__}` default value cannot be set in"
-				f" `Annotated` for {param_name!r}. Set the default value with `=` instead."
-			)
-			if value is not inspect.Signature.empty:
-				field_info.default = value
-			else:
-				field_info.default = Required
-
-		# Get Annotated Depends
-		elif isinstance(frappeapi_annotation, params.Depends):
-			depends = frappeapi_annotation
-
-	if isinstance(value, params.Depends):
-		assert depends is None, (
-			"Cannot specify `Depends` in `Annotated` and default value" f" together for {param_name!r}"
-		)
-		assert field_info is None, (
-			"Cannot specify a FastAPI annotation in `Annotated` and `Depends` as a"
-			f" default value together for {param_name!r}"
-		)
-		depends = value
-
-	# Get FieldInfo from default value
-	elif isinstance(value, FieldInfo):
-		assert field_info is None, (
-			"Cannot specify FastAPI annotations in `Annotated` and default value" f" together for {param_name!r}"
-		)
-		field_info = value
-		if PYDANTIC_V2:
-			field_info.annotation = type_annotation
-
-	# Get `Depends` from type annotation
-	if depends is not None and depends.dependency is None:
-		# Copy `depends` before mutating it
-		depends = copy(depends)
-		depends.dependency = type_annotation
-
-	# Handle default assignations, neither field_info nor depends was not found in Annotated nor default value
-	elif field_info is None and depends is None:
-		default_value = value if value is not inspect.Signature.empty else Required
-		field_info = params.Query(annotation=use_annotation, default=default_value)
-
-	field = None
-	if field_info is not None:
-		if isinstance(field_info, params.Param) and getattr(field_info, "in_", None) is None:
-			field_info.in_ = params.ParamTypes.query
-
-		use_annotation_from_field_info = use_annotation
-		if not field_info.alias and getattr(field_info, "convert_underscores", None):
-			alias = param_name.replace("_", "-")
-		else:
-			alias = field_info.alias or param_name
-		field_info.alias = alias
-
-		field = create_model_field(
-			name=param_name,
-			type_=use_annotation_from_field_info,
-			default=field_info.default,
-			alias=alias,
-			required=field_info.default in (Required, Undefined),
-			field_info=field_info,
-		)
-		if isinstance(field_info, params.Query):
-			assert (
-				is_scalar_field(field) or is_scalar_sequence_field(field) or lenient_issubclass(field.type_, BaseModel)
-			)
-
-	return ParamDetails(type_annotation=type_annotation, depends=None, field=field)
-
-
 def request_params_to_args(
 	fields: Sequence[ModelField],
 	received_params: Union[Mapping[str, Any], QueryParams],
@@ -467,89 +299,6 @@ def parse_and_validate_request(
 	errors.extend(query_errors)
 
 	return SolvedDependency(values=values, errors=errors, background_tasks=None, response=response, dependency_cache={})
-
-
-def get_typed_signature(func: Callable[..., Any]) -> inspect.Signature:
-	"""
-	Generate a typed signature (parameters) for the endpoint function.
-	"""
-	signature = inspect.signature(func)
-	globalns = getattr(func, "__globals__", {})
-	typed_params = [
-		inspect.Parameter(
-			name=param.name,
-			kind=param.kind,
-			default=param.default,
-			annotation=get_typed_annotation(param.annotation, globalns),
-		)
-		for param in signature.parameters.values()
-	]
-	typed_signature = inspect.Signature(typed_params)
-	return typed_signature
-
-
-def build_dependant(
-	*,
-	path: str,
-	func: Callable[..., Any],
-	name: Optional[str] = None,
-	security_scopes: Optional[List[str]] = None,
-	use_cache: bool = True,
-) -> Dependant:
-	endpoint_signature = get_typed_signature(func)
-	signature_params = endpoint_signature.parameters
-	dependant = Dependant(
-		call=func,
-		name=name,
-		path=path,
-		security_scopes=security_scopes,
-		use_cache=use_cache,
-	)
-
-	for param_name, param in signature_params.items():
-		param_details = analyze_param(param_name=param_name, annotation=param.annotation, value=param.default)
-
-		assert param_details.field is not None
-		add_param_to_fields(field=param_details.field, dependant=dependant)
-
-	return dependant
-
-
-def generate_unique_id(route: "APIRoute") -> str:
-	operation_id = f"{route.name}{route.path}"
-	operation_id = re.sub(r"\W", "_", operation_id)
-	assert route.methods
-	operation_id = f"{operation_id}_{list(route.methods)[0].lower()}"
-	return operation_id
-
-
-def get_value_or_default(
-	first_item: Union[DefaultPlaceholder, DefaultType],
-	*extra_items: Union[DefaultPlaceholder, DefaultType],
-) -> Union[DefaultPlaceholder, DefaultType]:
-	"""
-	Pass items or `DefaultPlaceholder`s by descending priority.
-
-	The first one to _not_ be a `DefaultPlaceholder` will be returned.
-
-	Otherwise, the first item (a `DefaultPlaceholder`) will be returned.
-	"""
-	items = (first_item,) + extra_items
-	for item in items:
-		if not isinstance(item, DefaultPlaceholder):
-			return item
-	return first_item
-
-
-def get_typed_return_annotation(call: Callable[..., Any]) -> Any:
-	signature = inspect.signature(call)
-	annotation = signature.return_annotation
-
-	if annotation is inspect.Signature.empty:
-		return None
-
-	globalns = getattr(call, "__globals__", {})
-	return get_typed_annotation(annotation, globalns)
 
 
 class APIRoute(FastAPIRoute):
@@ -672,7 +421,10 @@ class APIRoute(FastAPIRoute):
 			self.response_fields = {}
 		assert callable(endpoint), "endpoint must be a callable"
 
-		self.dependant = build_dependant(path=self.path, func=self.endpoint)
+		self.dependant = get_dependant(
+			path=self.path,
+			call=self.endpoint,
+		)
 		for depends in self.dependencies[::-1]:
 			self.dependant.dependencies.insert(
 				0,
