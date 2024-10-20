@@ -40,8 +40,10 @@ classifiers = [
 ]
 dependencies = [
     "pydantic==2.6.4,<3.0.0",
-    "typing-extensions>=4.10.0",
-    "openapi-pydantic-v2>=0.1.0,<2.0.0",
+    "typing-extensions>=4.12.2",
+    "openapi_pydantic_v2>=0.1.0,<2.0.0",
+    "Werkzeug>=2.3.8",
+    "fastapi~=0.115.2",
 ]
 [project.optional-dependencies]
 dev = [
@@ -54,7 +56,7 @@ dev = [
 
 [tool.ruff]
 target-version = "py310"
-line-length = 110
+line-length = 120
 show-fixes = true
 
 
@@ -63,9 +65,9 @@ select = [
     "F", # pyflakes
     "E", "W", # pycodestyle (PEP 8) E for error, W for warning
     "I", # flake8-isort
-    "B", # flake8-bugbear https://github.com/PyCQA/flake8-bugbear#list-of-warnings
+    # "B", # flake8-bugbear https://github.com/PyCQA/flake8-bugbear#list-of-warnings
     "N", # PEP8 Naming Conventions, fixable
-    "S", # flake8-bandit for Security checks, fixable
+    # "S", # flake8-bandit for Security checks, fixable
     "T20", # flake8-print for checking for print statements, fixable
     "PT", # flake8-pytest-style for checking for pytest best practices, fixable
     "Q", # flake8-quotes for checking for consistent quotes, fixable

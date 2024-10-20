@@ -1,189 +1,268 @@
-import inspect
-import json
-from typing import Any, Dict, List, Optional, Union
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Sequence, Type, Union
 
-import frappe
-from frappe import whitelist
-from openapi_pydantic_v2 import Info, OpenAPI, Operation, PathItem, Response, Server
-from pydantic import BaseModel, ValidationError
-from typing_extensions import Annotated, Doc
-from werkzeug.wrappers import Response as WerkzeugResponse
+from fastapi.datastructures import Default
+from fastapi.params import Depends
+from werkzeug.wrappers import Request as WerkzeugRequest, Response as WerkzeugResponse
 
-from frappeapi.datastructures import QueryParams
-from frappeapi.utils import (
-	create_openapi_param_dict,
-	create_validator_model,
-	extract_relative_path,
-	format_validation_error,
-)
+from frappeapi.responses import JSONResponse
+from frappeapi.routing import APIRouter
 
 
 class FrappeAPI:
 	def __init__(
 		self,
-		title: Annotated[
-			str,
-			Doc(
-				"""
-                    The title of the API.
-                    It will be added to the generated OpenAPI (e.g., visible at `/docs`).
-                    """
-			),
-		] = "FrappeAPI",
-		summary: Annotated[
-			Optional[str],
-			Doc(
-				"""
-                    A short summary of the API.
-                    It will be added to the generated OpenAPI (e.g., visible at `/docs`).
-                    """
-			),
-		] = None,
-		description: Annotated[
-			str,
-			Doc(
-				"""
-                    A description of the API. Supports Markdown (using [CommonMark syntax](https://commonmark.org/)).
-                    It will be added to the generated OpenAPI (e.g., visible at `/docs`).
-                    """
-			),
-		] = "",
-		version: Annotated[
-			str,
-			Doc(
-				"""
-                    The version of the API.
-                    Note: This is the version of your application, not the OpenAPI specification nor FastAPI.
-                    It will be added to the generated OpenAPI (e.g., visible at `/docs`).
-                    """
-			),
-		] = "0.1.0",
-		servers: Annotated[
-			Optional[List[Dict[str, Union[str, Any]]]],
-			Doc(
-				"""
-                A `list` of `dict`s with connectivity information to a target server.
-
-                You would use it, for example, if your application is served from
-                different domains and you want to use the same Swagger UI in the
-                browser to interact with each of them (instead of having multiple
-                browser tabs open). Or if you want to leave fixed the possible URLs.
-
-                If the servers `list` is not provided, or is an empty `list`, the
-                default value would be a `dict` with a `url` value of `/`.
-
-                Each item in the `list` is a `dict` containing:
-
-                * `url`: A URL to the target host. This URL supports Server Variables
-                and MAY be relative, to indicate that the host location is relative
-                to the location where the OpenAPI document is being served. Variable
-                substitutions will be made when a variable is named in `{`brackets`}`.
-                * `description`: An optional string describing the host designated by
-                the URL. [CommonMark syntax](https://commonmark.org/) MAY be used for
-                rich text representation.
-                * `variables`: A `dict` between a variable name and its value. The value
-                    is used for substitution in the server's URL template.
-
-                ```python
-                from frappeapi import FrappeAPI
-
-                app = FrappeAPI(
-                    servers=[
-                        {"url": "https://stag.example.com", "description": "Staging environment"},
-                        {"url": "https://prod.example.com", "description": "Production environment"},
-                    ]
-                )
-                ```
-                """
-			),
+		title: Optional[str] = "Frappe API",
+		summary: Optional[str] = None,
+		description: Optional[str] = None,
+		version: Optional[str] = "0.1.0",
+		servers: Optional[List[Dict[str, Union[str, Any]]]] = None,
+		openapi_tags: Optional[List[Dict[str, Any]]] = None,
+		terms_of_service: Optional[str] = None,
+		contact: Optional[Dict[str, Union[str, Any]]] = None,
+		license_info: Optional[Dict[str, Union[str, Any]]] = None,
+		separate_input_output_schemas: bool = True,
+		dependencies: Optional[Sequence[Depends]] = None,
+		default_response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		middleware: Optional[Sequence] = None,
+		exception_handlers: Optional[
+			Dict[
+				Union[int, Type[Exception]],
+				Callable[[WerkzeugResponse, Any], WerkzeugResponse],
+			]
 		] = None,
 	):
 		self.title = title
 		self.summary = summary
 		self.description = description
 		self.version = version
-		self.routes: List[Dict[str, Any]] = []
-		self.openapi_schema: Optional[Dict[str, Any]] = None
-		self.servers = servers or [{"url": "/"}]
+		self.servers = servers
+		self.openapi_version: str = "3.1.0"
+		self.openapi_tags = openapi_tags
+		self.terms_of_service = terms_of_service
+		self.contact = contact
+		self.license_info = license_info
+		self.separate_input_output_schemas = separate_input_output_schemas
+		assert self.title, "A title must be provided for OpenAPI, e.g.: 'My API'"
+		assert self.version, "A version must be provided for OpenAPI, e.g.: '1.0.0'"
 
-	def generate_openapi_schema(self):
-		paths = {}
-		for item in self.routes:
-			paths[item["path"]] = item["item"]
-
-		openapi_model = OpenAPI(
-			openapi="3.0.0",
-			info=Info(title=self.title, version=self.version, description=self.description),
-			paths=paths,
-			servers=[Server(**server) for server in self.servers],
+		self.exception_handlers: Dict[Type[Exception], Callable] = (
+			{} if exception_handlers is None else exception_handlers
 		)
-		return openapi_model
+		self.router = APIRouter(
+			title=self.title,
+			version=self.version,
+			openapi_version=self.openapi_version,
+			summary=self.summary,
+			description=self.description,
+			webhooks=None,
+			openapi_tags=self.openapi_tags,
+			servers=self.servers,
+			terms_of_service=self.terms_of_service,
+			contact=self.contact,
+			license_info=self.license_info,
+			separate_input_output_schemas=self.separate_input_output_schemas,
+			exception_handlers=self.exception_handlers,
+			default_response_class=default_response_class,
+		)
+		self.openapi_schema: Optional[Dict[str, Any]] = None
 
-	def generate_openapi_json(self):
-		openapi_schema = self.generate_openapi_schema().dict(by_alias=True, exclude_none=True)
-		return json.dumps(openapi_schema, indent=2)
-
-	def openapi(self):
-		if not self.openapi_schema:
-			self.openapi_schema = self.generate_openapi_schema()
-
+	def openapi(self) -> Dict[str, Any]:
+		if self.openapi_schema is None:
+			self.openapi_schema = self.router.openapi()
 		return self.openapi_schema
 
-	def add_route(
+	def get(
 		self,
-		path: str,
-		method: str,
-		response_model: BaseModel,
-		parameters: List[Dict[str, Any]] | None = None,
+		*,
+		response_model: Any = Default(None),
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
-		# Correctly handle adding a new path or appending to an existing one
-		path_item = next((item for item in self.routes if item["path"] == path), None)
-		if not path_item:
-			path_item = {"path": path, "item": PathItem()}
-			self.routes.append(path_item)
-
-		# Dynamically set the operation based on the HTTP method
-		operation = Operation(
-			parameters=parameters,
-			responses={
-				"200": Response(
-					description="Successful response",
-					content={"application/json": {"schema": response_model.model_json_schema()}},
-				)
-			},
+		return self.router.get(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
 		)
-		setattr(path_item["item"], method.lower(), operation)
 
-	def get(self, response_model: Any = None):
-		def decorator(func):
-			path = "/api/method/" + extract_relative_path(inspect.getfile(func)) + "." + func.__name__
+	def post(
+		self,
+		*,
+		response_model: Any = Default(None),
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
+	):
+		return self.router.post(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
+		)
 
-			@whitelist(methods=["GET"])
-			def wrapper(*args, **kwargs):
-				try:
-					query_param_validator_model = create_validator_model(func)
-					query_params = QueryParams(frappe.request.query_string)
-					query_param_validator_model(**query_params.to_dict())
-				except ValidationError as e:
-					return format_validation_error(e)
+	def put(
+		self,
+		*,
+		response_model: Any = Default(None),
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
+	):
+		return self.router.put(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
+		)
 
-				valid_params = inspect.signature(func).parameters
-				filtered_args = {k: v for k, v in kwargs.items() if k in valid_params}
-				try:
-					result = func(*args, **filtered_args)
-					if issubclass(response_model, BaseModel):
-						response_content = json.dumps(response_model(**result).dict())
-						return WerkzeugResponse(response_content, status=200, mimetype="application/json")
-					else:
-						response_content = json.dumps(result)
-						return WerkzeugResponse(response_content, status=200, mimetype="application/json")
-				except Exception as exc:
-					error_response = {"detail": str(exc)}
-					response_body = json.dumps(error_response)
-					return WerkzeugResponse(response_body, status=500, mimetype="application/json")
+	def delete(
+		self,
+		*,
+		response_model: Any = Default(None),
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
+	):
+		return self.router.delete(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
+		)
 
-			parameters = create_openapi_param_dict(func)
-			self.add_route(path=path, method="GET", response_model=response_model, parameters=parameters)
-			return wrapper
+	def patch(
+		self,
+		*,
+		response_model: Any = Default(None),
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
+	):
+		return self.router.patch(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
+		)
+
+	def options(
+		self,
+		*,
+		response_model: Any = None,
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
+	):
+		return self.router.options(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
+		)
+
+	def head(
+		self,
+		*,
+		response_model: Any = Default(None),
+		status_code: Optional[int] = None,
+		description: Optional[str] = None,
+		tags: Optional[List[Union[str, Enum]]] = None,
+		summary: Optional[str] = None,
+		include_in_schema: bool = True,
+		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
+	):
+		return self.router.head(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
+		)
+
+	def exception_handler(self, exc_class: Type[Exception]) -> Callable:
+		"""
+		Add an exception handler to the application.
+
+		Exception handlers are used to handle exceptions that are raised during the processing of a request.
+		"""
+
+		def decorator(func: Callable[[WerkzeugRequest, Exception], WerkzeugResponse]):
+			self.exception_handlers[exc_class] = func
+			return func
 
 		return decorator
