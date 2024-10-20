@@ -12,11 +12,16 @@ from frappeapi.routing import APIRouter
 class FrappeAPI:
 	def __init__(
 		self,
-		title: Optional[str] = None,
+		title: Optional[str] = "Frappe API",
 		summary: Optional[str] = None,
 		description: Optional[str] = None,
-		version: Optional[str] = None,
+		version: Optional[str] = "0.1.0",
 		servers: Optional[List[Dict[str, Union[str, Any]]]] = None,
+		openapi_tags: Optional[List[Dict[str, Any]]] = None,
+		terms_of_service: Optional[str] = None,
+		contact: Optional[Dict[str, Union[str, Any]]] = None,
+		license_info: Optional[Dict[str, Union[str, Any]]] = None,
+		separate_input_output_schemas: bool = True,
 		dependencies: Optional[Sequence[Depends]] = None,
 		default_response_class: Type[WerkzeugResponse] = Default(JSONResponse),
 		middleware: Optional[Sequence] = None,
@@ -32,13 +37,40 @@ class FrappeAPI:
 		self.description = description
 		self.version = version
 		self.servers = servers
+		self.openapi_version: str = "3.1.0"
+		self.openapi_tags = openapi_tags
+		self.terms_of_service = terms_of_service
+		self.contact = contact
+		self.license_info = license_info
+		self.separate_input_output_schemas = separate_input_output_schemas
+		assert self.title, "A title must be provided for OpenAPI, e.g.: 'My API'"
+		assert self.version, "A version must be provided for OpenAPI, e.g.: '1.0.0'"
 
 		self.exception_handlers: Dict[Type[Exception], Callable] = (
 			{} if exception_handlers is None else exception_handlers
 		)
 		self.router = APIRouter(
-			exception_handlers=self.exception_handlers, default_response_class=default_response_class
+			title=self.title,
+			version=self.version,
+			openapi_version=self.openapi_version,
+			summary=self.summary,
+			description=self.description,
+			webhooks=None,
+			openapi_tags=self.openapi_tags,
+			servers=self.servers,
+			terms_of_service=self.terms_of_service,
+			contact=self.contact,
+			license_info=self.license_info,
+			separate_input_output_schemas=self.separate_input_output_schemas,
+			exception_handlers=self.exception_handlers,
+			default_response_class=default_response_class,
 		)
+		self.openapi_schema: Optional[Dict[str, Any]] = None
+
+	def openapi(self) -> Dict[str, Any]:
+		if self.openapi_schema is None:
+			self.openapi_schema = self.router.openapi()
+		return self.openapi_schema
 
 	def get(
 		self,
@@ -50,6 +82,9 @@ class FrappeAPI:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		return self.router.get(
 			response_model=response_model,
@@ -59,6 +94,8 @@ class FrappeAPI:
 			summary=summary,
 			include_in_schema=include_in_schema,
 			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
 		)
 
 	def post(
@@ -71,6 +108,9 @@ class FrappeAPI:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		return self.router.post(
 			response_model=response_model,
@@ -80,6 +120,8 @@ class FrappeAPI:
 			summary=summary,
 			include_in_schema=include_in_schema,
 			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
 		)
 
 	def put(
@@ -92,6 +134,9 @@ class FrappeAPI:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		return self.router.put(
 			response_model=response_model,
@@ -101,6 +146,8 @@ class FrappeAPI:
 			summary=summary,
 			include_in_schema=include_in_schema,
 			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
 		)
 
 	def delete(
@@ -113,6 +160,9 @@ class FrappeAPI:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		return self.router.delete(
 			response_model=response_model,
@@ -122,6 +172,8 @@ class FrappeAPI:
 			summary=summary,
 			include_in_schema=include_in_schema,
 			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
 		)
 
 	def patch(
@@ -134,6 +186,9 @@ class FrappeAPI:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		return self.router.patch(
 			response_model=response_model,
@@ -143,6 +198,8 @@ class FrappeAPI:
 			summary=summary,
 			include_in_schema=include_in_schema,
 			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
 		)
 
 	def options(
@@ -155,6 +212,9 @@ class FrappeAPI:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		return self.router.options(
 			response_model=response_model,
@@ -164,6 +224,8 @@ class FrappeAPI:
 			summary=summary,
 			include_in_schema=include_in_schema,
 			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
 		)
 
 	def head(
@@ -176,6 +238,9 @@ class FrappeAPI:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		return self.router.head(
 			response_model=response_model,
@@ -185,6 +250,8 @@ class FrappeAPI:
 			summary=summary,
 			include_in_schema=include_in_schema,
 			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
 		)
 
 	def exception_handler(self, exc_class: Type[Exception]) -> Callable:

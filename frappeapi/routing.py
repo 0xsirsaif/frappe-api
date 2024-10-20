@@ -2,7 +2,7 @@ import dataclasses
 import inspect
 import re
 from copy import copy
-from enum import Enum
+from enum import Enum, IntEnum
 from typing import (
 	Annotated,
 	Any,
@@ -65,11 +65,17 @@ from fastapi.dependencies.utils import (
 	ParamDetails,
 	SolvedDependency,
 	_get_multidict_value,
+	_should_embed_body_fields,
 	_validate_value_with_model_field,
 	add_param_to_fields,
+	get_body_field,
+	get_flat_dependant,
+	get_parameterless_sub_dependant,
 	get_typed_annotation,
 )
 from fastapi.encoders import jsonable_encoder
+from fastapi.openapi.utils import get_openapi
+from fastapi.routing import APIRoute as FastAPIRoute, BaseRoute as FastAPIBaseRoute
 from fastapi.types import IncEx
 from fastapi.utils import is_body_allowed_for_status_code
 from pydantic import BaseModel, PydanticSchemaGenerationError
@@ -546,64 +552,84 @@ def get_typed_return_annotation(call: Callable[..., Any]) -> Any:
 	return get_typed_annotation(annotation, globalns)
 
 
-class APIRoute:
+class APIRoute(FastAPIRoute):
 	def __init__(
 		self,
-		func: Callable,
+		endpoint: Callable,
 		*,
-		exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]],
-		methods: Optional[Union[Set[str], List[str]]] = None,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
-		description: Optional[str] = None,
 		tags: Optional[List[Union[str, Enum]]] = None,
+		dependencies: Optional[Sequence[params.Depends]] = None,
 		summary: Optional[str] = None,
-		include_in_schema: bool = True,
-		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
+		description: Optional[str] = None,
+		response_description: str = "Successful Response",
+		responses: Optional[Dict[Union[int, str], Dict[str, Any]]] = None,
+		deprecated: bool = False,
+		name: Optional[str] = None,
+		methods: Optional[Union[Set[str], List[str]]] = None,
+		operation_id: Optional[str] = None,
 		response_model_include: Optional[IncEx] = None,
 		response_model_exclude: Optional[IncEx] = None,
 		response_model_by_alias: bool = True,
 		response_model_exclude_unset: bool = False,
 		response_model_exclude_defaults: bool = False,
 		response_model_exclude_none: bool = False,
+		include_in_schema: bool = True,
+		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
+		dependency_overrides_provider: Optional[Any] = None,
+		callbacks: Optional[List[FastAPIBaseRoute]] = None,
+		openapi_extra: Optional[Dict[str, Any]] = None,
+		generate_unique_id_function: Union[Callable[["APIRoute"], str], DefaultPlaceholder] = Default(
+			generate_unique_id
+		),
+		# Frappe parameters
+		exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]],
 	):
-		self.func = func
 		self.prefix = "/api/method"
-		self.path = self.prefix + extract_endpoint_relative_path(self.func) + "." + self.func.__name__
-		self.name = getattr(self.func, "__name__", None)
-
-		if methods is None:
-			methods = ["GET"]
-		self.methods: Set[str] = {method.upper() for method in methods}
+		self.endpoint = endpoint
+		self.path = self.prefix + "/" + extract_endpoint_relative_path(self.endpoint) + "." + self.endpoint.__name__
 
 		if isinstance(response_model, DefaultPlaceholder):
-			return_annotation = get_typed_return_annotation(self.func)
+			return_annotation = get_typed_return_annotation(self.endpoint)
 			response_model = None if lenient_issubclass(return_annotation, WerkzeugResponse) else return_annotation
 
 		self.response_model = response_model
-
-		self.status_code = status_code
-
-		self.description = description or inspect.cleandoc(self.func.__doc__ or "")
-		# if a "form feed" character (page break) is found in the description text,
-		# truncate description text to the content preceding the first "form feed"
-		self.description = self.description.split("\f")[0].strip()
-
-		self.response_class = response_class
-
-		self.tags = tags
 		self.summary = summary
-		self.unique_id = generate_unique_id(self)
-
-		self.include_in_schema = include_in_schema
+		self.response_description = response_description
+		self.deprecated = deprecated
+		self.operation_id = operation_id
 		self.response_model_include = response_model_include
 		self.response_model_exclude = response_model_exclude
 		self.response_model_by_alias = response_model_by_alias
 		self.response_model_exclude_unset = response_model_exclude_unset
 		self.response_model_exclude_defaults = response_model_exclude_defaults
 		self.response_model_exclude_none = response_model_exclude_none
+		self.include_in_schema = include_in_schema
+		self.response_class = response_class
+		self.dependency_overrides_provider = dependency_overrides_provider
+		self.callbacks = callbacks
+		self.openapi_extra = openapi_extra
+		self.generate_unique_id_function = generate_unique_id_function
+		self.tags = tags or []
+		self.responses = responses or {}
+		self.name = name or getattr(self.endpoint, "__name__", None)
+		self.path_regex, self.path_format, self.param_convertors = None, self.path, {}
 
-		self.exception_handlers = exception_handlers
+		if methods is None:
+			methods = ["GET"]
+		self.methods: Set[str] = {method.upper() for method in methods}
+		if isinstance(generate_unique_id_function, DefaultPlaceholder):
+			current_generate_unique_id: Callable[[APIRoute], str] = generate_unique_id_function.value
+		else:
+			current_generate_unique_id = generate_unique_id_function
+		self.unique_id = self.operation_id or current_generate_unique_id(self)
+
+		# normalize enums e.g. http.HTTPStatus
+		if isinstance(status_code, IntEnum):
+			status_code = int(status_code)
+
+		self.status_code = status_code
 
 		if self.response_model:
 			assert is_body_allowed_for_status_code(
@@ -622,19 +648,57 @@ class APIRoute:
 			self.response_field = None  # type: ignore
 			self.secure_cloned_response_field = None
 
+		self.dependencies = list(dependencies or [])
+		self.description = description or inspect.cleandoc(self.endpoint.__doc__ or "")
+		# if a "form feed" character (page break) is found in the description text,
+		# truncate description text to the content preceding the first "form feed"
+		self.description = self.description.split("\f")[0].strip()
+
+		response_fields = {}
+		for additional_status_code, response in self.responses.items():
+			assert isinstance(response, dict), "An additional response must be a dict"
+			model = response.get("model")
+			if model:
+				assert is_body_allowed_for_status_code(
+					additional_status_code
+				), f"Status code {additional_status_code} must not have a response body"
+				response_name = f"Response_{additional_status_code}_{self.unique_id}"
+				response_field = create_model_field(name=response_name, type_=model, mode="serialization")
+				response_fields[additional_status_code] = response_field
+
+		if response_fields:
+			self.response_fields: Dict[Union[int, str], ModelField] = response_fields
+		else:
+			self.response_fields = {}
+		assert callable(endpoint), "endpoint must be a callable"
+
+		self.dependant = build_dependant(path=self.path, func=self.endpoint)
+		for depends in self.dependencies[::-1]:
+			self.dependant.dependencies.insert(
+				0,
+				get_parameterless_sub_dependant(depends=depends, path=self.path_format),
+			)
+
+		self._flat_dependant = get_flat_dependant(self.dependant)
+		self._embed_body_fields = _should_embed_body_fields(self._flat_dependant.body_params)
+		self.body_field = get_body_field(
+			flat_dependant=self._flat_dependant,
+			name=self.unique_id,
+			embed_body_fields=self._embed_body_fields,
+		)
+
+		self.exception_handlers = exception_handlers
+
 	def handle_request(self, *args, **kwargs):
 		request = frappe.request
 		try:
-			dependent = build_dependant(path=self.path, func=self.func)
-			assert dependent.call is not None, "dependant.call must be a function"
-
 			errors: List[Any] = []
-			solved_result = parse_and_validate_request(dependant=dependent, request=request)
+			solved_result = parse_and_validate_request(dependant=self.dependant, request=request)
 			errors = solved_result.errors
 			body = None
 			if not errors:
 				request_data = solved_result.values
-				raw_response = self.func(**request_data)
+				raw_response = self.endpoint(**request_data)
 
 				if isinstance(raw_response, WerkzeugResponse):
 					# if raw_response.background is None:
@@ -647,9 +711,9 @@ class APIRoute:
 					# # response class, in the case of redirect it's 307
 					current_status_code = self.status_code if self.status_code else solved_result.response.status_code
 					if current_status_code is not None:
-						response_args["status"] = current_status_code
+						response_args["status_code"] = current_status_code
 					if solved_result.response.status_code:
-						response_args["status"] = solved_result.response.status_code
+						response_args["status_code"] = solved_result.response.status_code
 
 					content = serialize_response(
 						field=self.secure_cloned_response_field,
@@ -705,45 +769,68 @@ class APIRoute:
 					return handler(request, exc)
 			raise exc
 
+	def __repr__(self) -> str:
+		class_name = self.__class__.__name__
+		methods = sorted(self.methods or [])
+		path, name = self.path, self.name
+		return f"{class_name}(path={path!r}, name={name!r}, methods={methods!r})"
+
 
 class APIRouter:
 	def __init__(
 		self,
+		*,
+		title: str,
+		version: str,
+		openapi_version: str = "3.1.0",
+		summary: Optional[str] = None,
+		description: Optional[str] = None,
+		separate_input_output_schemas: bool = True,
+		openapi_tags: Optional[List[Dict[str, Any]]] = None,
+		terms_of_service: Optional[str] = None,
+		contact: Optional[Dict[str, Union[str, Any]]] = None,
+		license_info: Optional[Dict[str, Union[str, Any]]] = None,
+		webhooks: Optional[List[Any]] = None,
+		servers: Optional[List[Dict[str, Union[str, Any]]]] = None,
 		default_response_class: Type[WerkzeugResponse] = Default(WerkzeugResponse),
 		exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]] = None,
 	):
 		self.default_response_class = default_response_class
 		self.routes: List[APIRoute] = []
 		self.exception_handlers = exception_handlers
+		self.title = title
+		self.version = version
+		self.openapi_version = openapi_version
+		self.summary = summary
+		self.description = description
+		self.separate_input_output_schemas = separate_input_output_schemas
+		self.openapi_tags = openapi_tags
+		self.terms_of_service = terms_of_service
+		self.contact = contact
+		self.license_info = license_info
+		self.webhooks = webhooks
+		self.servers = servers
+		self.openapi_schema: Optional[Dict[str, Any]] = None
 
-	def add_api_route(
-		self,
-		func: Callable,
-		*,
-		response_model: Any = None,
-		status_code: Optional[int] = None,
-		description: Optional[str] = None,
-		tags: Optional[List[Union[str, Enum]]] = None,
-		summary: Optional[str] = None,
-		include_in_schema: bool = True,
-		methods: Optional[Union[Set[str], List[str]]] = None,
-		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
-	):
-		current_response_class = get_value_or_default(response_class, self.default_response_class)
-		route = APIRoute(
-			func,
-			exception_handlers=self.exception_handlers,
-			methods=methods,
-			response_model=response_model,
-			status_code=status_code,
-			description=description,
-			tags=tags,
-			summary=summary,
-			include_in_schema=include_in_schema,
-			response_class=current_response_class,
-		)
-		self.routes.append(route)
-		return route
+	def openapi(self) -> Dict[str, Any]:
+		if self.openapi_schema is None:
+			self.openapi_schema = get_openapi(
+				title=self.title,
+				version=self.version,
+				openapi_version=self.openapi_version,
+				summary=self.summary,
+				description=self.description,
+				routes=self.routes,
+				webhooks=self.webhooks,
+				tags=self.openapi_tags,
+				servers=self.servers,
+				terms_of_service=self.terms_of_service,
+				contact=self.contact,
+				license_info=self.license_info,
+				separate_input_output_schemas=self.separate_input_output_schemas,
+			)
+
+		return self.openapi_schema
 
 	def api_route(
 		self,
@@ -756,23 +843,31 @@ class APIRouter:
 		include_in_schema: bool = True,
 		methods: Optional[List[str]] = None,
 		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		def decorator(func: Callable):
-			# TODO: Add allow_guest to the decorator
-			# TODO: Validate @has_website_permission
-			@whitelist(methods=methods)
+			# Register the route
+
+			current_response_class = get_value_or_default(response_class, self.default_response_class)
+			route = APIRoute(
+				func,
+				exception_handlers=self.exception_handlers,
+				methods=methods,
+				response_model=response_model,
+				status_code=status_code,
+				description=description,
+				tags=tags,
+				summary=summary,
+				include_in_schema=include_in_schema,
+				response_class=current_response_class,
+			)
+			self.routes.append(route)
+
+			# When the route is called, it will be handled by the route's handle_request method
+			@whitelist(methods=methods, allow_guest=allow_guest, xss_safe=xss_safe)
 			def wrapper(*args, **kwargs):
-				route = self.add_api_route(
-					func,
-					response_model=response_model,
-					status_code=status_code,
-					description=description,
-					tags=tags,
-					summary=summary,
-					include_in_schema=include_in_schema,
-					methods=methods,
-					response_class=response_class,
-				)
 				return route.handle_request(*args, **kwargs)
 
 			return wrapper
@@ -789,6 +884,9 @@ class APIRouter:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		return self.api_route(
 			methods=["GET"],
@@ -799,6 +897,8 @@ class APIRouter:
 			summary=summary,
 			include_in_schema=include_in_schema,
 			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
 		)
 
 	def post(
@@ -811,6 +911,9 @@ class APIRouter:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		pass
 
@@ -824,6 +927,9 @@ class APIRouter:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		pass
 
@@ -837,6 +943,9 @@ class APIRouter:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		pass
 
@@ -850,6 +959,9 @@ class APIRouter:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		pass
 
@@ -863,6 +975,9 @@ class APIRouter:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		pass
 
@@ -876,5 +991,8 @@ class APIRouter:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		response_class: Union[Type[WerkzeugResponse], DefaultPlaceholder] = Default(JSONResponse),
+		# Frappe parameters
+		allow_guest: bool = False,
+		xss_safe: bool = False,
 	):
 		pass

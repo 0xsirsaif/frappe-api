@@ -11,12 +11,13 @@ class JSONResponse(Response):
 	A custom Werkzeug Response class for JSON content.
 	"""
 
+	media_type = "application/json"
 	default_mimetype = "application/json"
 
 	def __init__(
 		self,
 		content: Any = None,
-		status: int | str | HTTPStatus | None = None,
+		status_code: int | str | HTTPStatus | None = 200,
 		headers: Optional[dict] = None,
 		media_type: str = "application/json",
 		**kwargs,
@@ -36,7 +37,12 @@ class JSONResponse(Response):
 			content = json.dumps(content)
 
 		super().__init__(
-			response=content, status=status, headers=headers, mimetype=media_type, content_type=media_type, **kwargs
+			response=content,
+			status=status_code,
+			headers=headers,
+			mimetype=media_type,
+			content_type=media_type,
+			**kwargs,
 		)
 
 	@property
