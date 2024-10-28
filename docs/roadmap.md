@@ -33,6 +33,11 @@
 - [ ] Endpoint-Level dependencies
 - [ ] to be continued...
 
+## Improve Frappe API System - Contribution
+
+- [ ] Add support for standard URI format i.e use `/` not `.` for endpoint paths
+- [ ] Add support for path parameters i.e `/api/method/greet/{name}`
+
 ## Related Frappe PRs and Issues
 
 - [PR #23135](https://github.com/frappe/frappe/pull/23135): Introducing type hints for API functions

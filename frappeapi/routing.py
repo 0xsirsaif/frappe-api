@@ -1,12 +1,13 @@
 import dataclasses
 import inspect
+import json
+from collections import defaultdict
 from enum import Enum, IntEnum
 from typing import (
 	Any,
 	Callable,
 	Dict,
 	List,
-	Mapping,
 	Optional,
 	Sequence,
 	Set,
@@ -50,8 +51,14 @@ from fastapi._compat import (
 	_get_model_config,
 	_model_dump,
 	get_cached_model_fields,
+	get_missing_field_error,
+	is_bytes_field,
+	is_bytes_sequence_field,
+	sequence_types,
+	serialize_sequence_value,
+	value_is_sequence,
 )
-from fastapi.datastructures import Default, DefaultPlaceholder, QueryParams
+from fastapi.datastructures import Default, DefaultPlaceholder, FormData, Headers, QueryParams, UploadFile
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import (
 	SolvedDependency,
@@ -63,6 +70,7 @@ from fastapi.dependencies.utils import (
 	get_flat_dependant,
 	get_parameterless_sub_dependant,
 	get_typed_return_annotation,
+	request_params_to_args,
 )
 from fastapi.encoders import jsonable_encoder
 from fastapi.openapi.utils import get_openapi
@@ -72,6 +80,7 @@ from fastapi.utils import generate_unique_id, get_value_or_default, is_body_allo
 from pydantic import BaseModel, PydanticSchemaGenerationError
 from pydantic._internal._utils import lenient_issubclass
 from pydantic.fields import FieldInfo
+from werkzeug.datastructures import MultiDict
 from werkzeug.wrappers import (
 	Request as WerkzeugRequest,
 	Response as WerkzeugResponse,
@@ -220,68 +229,95 @@ def create_model_field(
 		) from None
 
 
-def request_params_to_args(
-	fields: Sequence[ModelField],
-	received_params: Union[Mapping[str, Any], QueryParams],
-) -> Tuple[Dict[str, Any], List[Any]]:
+def _extract_form_body(
+	body_fields: List[ModelField],
+	received_body: FormData,
+) -> Dict[str, Any]:
+	values = {}
+	first_field = body_fields[0]
+	first_field_info = first_field.field_info
+
+	for field in body_fields:
+		value = _get_multidict_value(field, received_body)
+
+		if isinstance(first_field_info, params.File) and is_bytes_field(field) and isinstance(value, UploadFile):
+			# Synchronously read the file content
+			value = value.read()
+		elif is_bytes_sequence_field(field) and isinstance(first_field_info, params.File) and value_is_sequence(value):
+			# For sequence types, read each file sequentially
+			assert isinstance(value, sequence_types)  # type: ignore[arg-type]
+			results: List[Union[bytes, str]] = []
+
+			for sub_value in value:
+				# Synchronously read each file and append the content
+				file_content = sub_value.read()
+				results.append(file_content)
+
+			value = serialize_sequence_value(field=field, value=results)
+		if value is not None:
+			values[field.alias] = value
+
+	for key, value in received_body.items():
+		if key not in values:
+			values[key] = value
+
+	return values
+
+
+def request_body_to_args(
+	body_fields: List[ModelField],
+	received_body: Optional[Union[Dict[str, Any], FormData]],
+	embed_body_fields: bool,
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
 	values: Dict[str, Any] = {}
 	errors: List[Dict[str, Any]] = []
 
-	if not fields:
-		return values, errors
+	assert body_fields, "request_body_to_args() should be called with fields"
 
-	# If there is only one field, and it is a Pydantic BaseModel,
-	# then we need to extract all the fields from the model
-	first_field = fields[0]
-	fields_to_extract = fields
-	single_not_embedded_field = False
-	if len(fields) == 1 and lenient_issubclass(first_field.type_, BaseModel):
+	single_not_embedded_field = len(body_fields) == 1 and not embed_body_fields
+	first_field = body_fields[0]
+	body_to_process = received_body
+	fields_to_extract: List[ModelField] = body_fields
+	if single_not_embedded_field and lenient_issubclass(first_field.type_, BaseModel):
 		fields_to_extract = get_cached_model_fields(first_field.type_)
-		single_not_embedded_field = True
 
-	params_to_process: Dict[str, Any] = {}
-	processed_keys = set()
-
-	for field in fields_to_extract:
-		alias = None
-		value = _get_multidict_value(field, received_params, alias=alias)
-		if value is not None:
-			params_to_process[field.name] = value
-		processed_keys.add(alias or field.alias)
-		processed_keys.add(field.name)
-
-	for key, value in received_params.items():
-		if key not in processed_keys:
-			params_to_process[key] = value
+	if isinstance(received_body, FormData):
+		body_to_process = _extract_form_body(fields_to_extract, received_body)
 
 	if single_not_embedded_field:
-		field_info = first_field.field_info
-		assert isinstance(field_info, params.Param), "Params must be subclasses of Param"
-
-		loc: Tuple[str, ...] = (field_info.in_.value,)
-		v_, errors_ = _validate_value_with_model_field(
-			field=first_field, value=params_to_process, values=values, loc=loc
-		)
-
+		loc: Tuple[str, ...] = ("body",)
+		v_, errors_ = _validate_value_with_model_field(field=first_field, value=body_to_process, values=values, loc=loc)
 		return {first_field.name: v_}, errors_
 
-	for field in fields:
-		value = _get_multidict_value(field, received_params)
-
-		field_info = field.field_info
-		assert isinstance(field_info, params.Param), "Params must be subclasses of Param"
-		loc = (field_info.in_.value, field.alias)
+	for field in body_fields:
+		loc = ("body", field.alias)
+		value: Optional[Any] = None
+		if body_to_process is not None:
+			try:
+				value = body_to_process.get(field.alias)
+			# If the received body is a list, not a dict
+			except AttributeError:
+				errors.append(get_missing_field_error(loc))
+				continue
 		v_, errors_ = _validate_value_with_model_field(field=field, value=value, values=values, loc=loc)
 		if errors_:
 			errors.extend(errors_)
 		else:
 			values[field.name] = v_
-
 	return values, errors
 
 
 def parse_and_validate_request(
-	*, dependant: Dependant, request: Union[WerkzeugRequest, Any], response: Optional[WerkzeugResponse] = None
+	*,
+	request: WerkzeugRequest,
+	dependant: Dependant,
+	body: Optional[Union[Dict[str, Any], FormData]] = None,
+	# TODO: Validate this type
+	background_tasks: Optional[Any] = None,
+	response: Optional[WerkzeugResponse] = None,
+	dependency_overrides_provider: Optional[Any] = None,
+	dependency_cache: Optional[Dict[Tuple[Callable[..., Any], Tuple[str]], Any]] = None,
+	embed_body_fields: bool,
 ):
 	values: Dict[str, Any] = {}
 	errors: List[Any] = []
@@ -292,11 +328,41 @@ def parse_and_validate_request(
 
 		response.status = 200
 
-	request_query_params = QueryParams(frappe.request.query_string)
+	# TODO: Request Query Params
+	request_query_params = QueryParams(request.query_string)
+	# TODO: Headers
+	# Starlette Headers is an immutable, case-insensitive, and a multidict data structure
+	# it allows the same header key to have a multiple values (i.e comma-separated)
+	# But, Until now, Frappe or somthing in between
+	# choose a single Value (e.g., the last occurrence) to represent the header.
+	headers_dict = defaultdict(list)
+	for key, value in request.headers.items():
+		headers_dict[key].append(value)
+
+	combined_headers = {key: ", ".join(values) for key, values in headers_dict.items()}
+	request_headers = Headers(combined_headers)
+
+	# TODO: Cookies
+
+	# TODO: Body
+	if dependant.body_params:
+		(
+			body_values,
+			body_errors,
+		) = request_body_to_args(  # body_params checked above
+			body_fields=dependant.body_params,
+			received_body=body,
+			embed_body_fields=embed_body_fields,
+		)
+		values.update(body_values)
+		errors.extend(body_errors)
 
 	query_values, query_errors = request_params_to_args(dependant.query_params, request_query_params)
+	header_values, header_errors = request_params_to_args(dependant.header_params, request_headers)
+
 	values.update(query_values)
-	errors.extend(query_errors)
+	values.update(header_values)
+	errors += query_errors + header_errors
 
 	return SolvedDependency(values=values, errors=errors, background_tasks=None, response=response, dependency_cache={})
 
@@ -443,9 +509,58 @@ class APIRoute(FastAPIRoute):
 
 	def handle_request(self, *args, **kwargs):
 		request = frappe.request
+		is_body_form = self.body_field and isinstance(self.body_field.field_info, params.Form)
+		try:
+			body: Any = None
+			if self.body_field:
+				if is_body_form:
+					body = MultiDict(request.form)
+				else:
+					body_bytes = request.get_data()
+					if body_bytes:
+						json_body: Any = Undefined
+						content_type_value = request.headers.get("content-type")
+						if not content_type_value:
+							json_body = request.get_json(silent=True)
+						else:
+							import email.message
+
+							message = email.message.Message()
+							message["content-type"] = content_type_value
+							if message.get_content_maintype() == "application":
+								subtype = message.get_content_subtype()
+								if subtype == "json" or subtype.endswith("+json"):
+									json_body = request.get_json(silent=True)
+						body = json_body if json_body != Undefined else body_bytes
+		except json.JSONDecodeError as e:
+			validation_error = RequestValidationError(
+				[
+					{
+						"type": "json_invalid",
+						"loc": ("body", e.pos),
+						"msg": "JSON decode error",
+						"input": {},
+						"ctx": {"error": e.msg},
+					}
+				],
+				body=e.doc,
+			)
+			raise validation_error from e
+		except HTTPException:
+			# If a middleware raises an HTTPException, it should be raised again
+			raise
+		except Exception as e:
+			http_error = HTTPException(status=400, detail="There was an error parsing the body")
+			raise http_error from e
+
 		try:
 			errors: List[Any] = []
-			solved_result = parse_and_validate_request(dependant=self.dependant, request=request)
+			solved_result = parse_and_validate_request(
+				request=request,
+				dependant=self.dependant,
+				body=body,
+				embed_body_fields=self._embed_body_fields,
+			)
 			errors = solved_result.errors
 			body = None
 			if not errors:
@@ -498,7 +613,6 @@ class APIRoute(FastAPIRoute):
 			else:
 				validation_error = RequestValidationError(errors, body=body)
 				raise validation_error
-
 		except HTTPException as exc:
 			if self.exception_handlers.get(HTTPException):
 				return self.exception_handlers[HTTPException](request, exc)
