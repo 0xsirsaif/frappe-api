@@ -2,6 +2,7 @@ import dataclasses
 import inspect
 import json
 from collections import defaultdict
+from contextlib import ExitStack
 from enum import Enum, IntEnum
 from typing import (
 	Any,
@@ -280,10 +281,8 @@ def request_body_to_args(
 	fields_to_extract: List[ModelField] = body_fields
 	if single_not_embedded_field and lenient_issubclass(first_field.type_, BaseModel):
 		fields_to_extract = get_cached_model_fields(first_field.type_)
-
 	if isinstance(received_body, FormData):
 		body_to_process = _extract_form_body(fields_to_extract, received_body)
-
 	if single_not_embedded_field:
 		loc: Tuple[str, ...] = ("body",)
 		v_, errors_ = _validate_value_with_model_field(field=first_field, value=body_to_process, values=values, loc=loc)
@@ -317,6 +316,7 @@ def parse_and_validate_request(
 	response: Optional[WerkzeugResponse] = None,
 	dependency_overrides_provider: Optional[Any] = None,
 	dependency_cache: Optional[Dict[Tuple[Callable[..., Any], Tuple[str]], Any]] = None,
+	exit_stack: ExitStack,
 	embed_body_fields: bool,
 ):
 	values: Dict[str, Any] = {}
@@ -510,130 +510,159 @@ class APIRoute(FastAPIRoute):
 	def handle_request(self, *args, **kwargs):
 		request = frappe.request
 		is_body_form = self.body_field and isinstance(self.body_field.field_info, params.Form)
-		try:
-			body: Any = None
-			if self.body_field:
-				if is_body_form:
-					body = MultiDict(request.form)
-				else:
-					body_bytes = request.get_data()
-					if body_bytes:
-						json_body: Any = Undefined
-						content_type_value = request.headers.get("content-type")
-						if not content_type_value:
-							json_body = request.get_json(silent=True)
-						else:
-							import email.message
+		with ExitStack() as file_stack:
+			try:
+				body: Any = None
+				if self.body_field:
+					"""
 
-							message = email.message.Message()
-							message["content-type"] = content_type_value
-							if message.get_content_maintype() == "application":
-								subtype = message.get_content_subtype()
-								if subtype == "json" or subtype.endswith("+json"):
-									json_body = request.get_json(silent=True)
-						body = json_body if json_body != Undefined else body_bytes
-		except json.JSONDecodeError as e:
-			validation_error = RequestValidationError(
-				[
-					{
-						"type": "json_invalid",
-						"loc": ("body", e.pos),
-						"msg": "JSON decode error",
-						"input": {},
-						"ctx": {"error": e.msg},
-					}
-				],
-				body=e.doc,
-			)
-			raise validation_error from e
-		except HTTPException:
-			# If a middleware raises an HTTPException, it should be raised again
-			raise
-		except Exception as e:
-			http_error = HTTPException(status=400, detail="There was an error parsing the body")
-			raise http_error from e
+					"""
+					if is_body_form:
+						combined_data = MultiDict()
 
-		try:
-			errors: List[Any] = []
-			solved_result = parse_and_validate_request(
-				request=request,
-				dependant=self.dependant,
-				body=body,
-				embed_body_fields=self._embed_body_fields,
-			)
-			errors = solved_result.errors
-			body = None
-			if not errors:
-				request_data = solved_result.values
-				raw_response = self.endpoint(**request_data)
+						# Add form fields
+						if request.form:
+							combined_data.update(request.form)
 
-				if isinstance(raw_response, WerkzeugResponse):
-					# if raw_response.background is None:
-					# 	raw_response.background = solved_result.background_tasks
-					response = raw_response
-				else:
-					# response_args: Dict[str, Any] = {"background": solved_result.background_tasks}
-					response_args: Dict[str, Any] = {}
-					# If status_code was set, use it, otherwise use the default from the
-					# # response class, in the case of redirect it's 307
-					current_status_code = self.status_code if self.status_code else solved_result.response.status_code
-					if current_status_code is not None:
-						response_args["status_code"] = current_status_code
-					if solved_result.response.status_code:
-						response_args["status_code"] = solved_result.response.status_code
+						# Add and manage file fields
+						if request.files:
+							# Handle file uploads differently
+							for field_name, fileobj in request.files.items():
+								if hasattr(fileobj, "read"):
+									# Read the file content
+									file_content = fileobj.read()
+									# Reset file pointer for potential future reads
+									fileobj.seek(0)
+									# Store the content instead of FileStorage object
+									combined_data[field_name] = file_content
+									# Register cleanup
+									if hasattr(fileobj, "close"):
+										file_stack.callback(fileobj.close)
 
-					content = serialize_response(
-						field=self.secure_cloned_response_field,
-						response_content=raw_response,
-						include=self.response_model_include,
-						exclude=self.response_model_exclude,
-						by_alias=self.response_model_by_alias,
-						exclude_unset=self.response_model_exclude_unset,
-						exclude_defaults=self.response_model_exclude_defaults,
-						exclude_none=self.response_model_exclude_none,
-					)
-
-					if isinstance(self.response_class, DefaultPlaceholder):
-						actual_response_class: Type[WerkzeugResponse] = self.response_class.value
+						body = combined_data
 					else:
-						actual_response_class = self.response_class
+						body_bytes = request.get_data()
+						if body_bytes:
+							json_body: Any = Undefined
+							content_type_value = request.headers.get("content-type")
+							if not content_type_value:
+								json_body = request.get_json(silent=True)
+							else:
+								import email.message
 
-					response = actual_response_class(content, **response_args)
-					if not is_body_allowed_for_status_code(response.status_code):
-						response.body = b""
+								message = email.message.Message()
+								message["content-type"] = content_type_value
+								if message.get_content_maintype() == "application":
+									subtype = message.get_content_subtype()
+									if subtype == "json" or subtype.endswith("+json"):
+										json_body = request.get_json(silent=True)
+							body = json_body if json_body != Undefined else body_bytes
+			except json.JSONDecodeError as e:
+				validation_error = RequestValidationError(
+					[
+						{
+							"type": "json_invalid",
+							"loc": ("body", e.pos),
+							"msg": "JSON decode error",
+							"input": {},
+							"ctx": {"error": e.msg},
+						}
+					],
+					body=e.doc,
+				)
+				raise validation_error from e
+			except HTTPException:
+				# If a middleware raises an HTTPException, it should be raised again
+				raise
+			except Exception as e:
+				http_error = HTTPException(status=400, detail="There was an error parsing the body")
+				raise http_error from e
 
-					for key, value in solved_result.response.headers.items():
-						if key not in response.headers:
-							response.headers.add(key, value)
+			errors: List[Any] = []
+			with ExitStack() as exit_stack:
+				try:
+					solved_result = parse_and_validate_request(
+						request=request,
+						dependant=self.dependant,
+						body=body,
+						exit_stack=exit_stack,
+						embed_body_fields=self._embed_body_fields,
+					)
+					errors = solved_result.errors
+					if not errors:
+						request_data = solved_result.values
+						raw_response = self.endpoint(**request_data)
 
-					if response is None:
-						raise FrappeAPIError("No response object was returned.")
+						if isinstance(raw_response, WerkzeugResponse):
+							# if raw_response.background is None:
+							# 	raw_response.background = solved_result.background_tasks
+							response = raw_response
+						else:
+							# response_args: Dict[str, Any] = {"background": solved_result.background_tasks}
+							response_args: Dict[str, Any] = {}
+							# If status_code was set, use it, otherwise use the default from the
+							# # response class, in the case of redirect it's 307
+							current_status_code = (
+								self.status_code if self.status_code else solved_result.response.status_code
+							)
+							if current_status_code is not None:
+								response_args["status_code"] = current_status_code
+							if solved_result.response.status_code:
+								response_args["status_code"] = solved_result.response.status_code
 
-				return response
-			else:
-				validation_error = RequestValidationError(errors, body=body)
-				raise validation_error
-		except HTTPException as exc:
-			if self.exception_handlers.get(HTTPException):
-				return self.exception_handlers[HTTPException](request, exc)
-			else:
-				return http_exception_handler(request, exc)
-		except RequestValidationError as exc:
-			if self.exception_handlers.get(RequestValidationError):
-				return self.exception_handlers[RequestValidationError](request, exc)
-			else:
-				return request_validation_exception_handler(request, exc)
-		except ResponseValidationError as exc:
-			if self.exception_handlers.get(ResponseValidationError):
-				return self.exception_handlers[ResponseValidationError](request, exc)
-			else:
-				return response_validation_exception_handler(request, exc)
-		except Exception as exc:
-			# Check if there's a custom handler for this exception type
-			for exc_type, handler in self.exception_handlers.items():
-				if isinstance(exc, exc_type):
-					return handler(request, exc)
-			raise exc
+							content = serialize_response(
+								field=self.secure_cloned_response_field,
+								response_content=raw_response,
+								include=self.response_model_include,
+								exclude=self.response_model_exclude,
+								by_alias=self.response_model_by_alias,
+								exclude_unset=self.response_model_exclude_unset,
+								exclude_defaults=self.response_model_exclude_defaults,
+								exclude_none=self.response_model_exclude_none,
+							)
+
+							if isinstance(self.response_class, DefaultPlaceholder):
+								actual_response_class: Type[WerkzeugResponse] = self.response_class.value
+							else:
+								actual_response_class = self.response_class
+
+							response = actual_response_class(content, **response_args)
+							if not is_body_allowed_for_status_code(response.status_code):
+								response.body = b""
+
+							for key, value in solved_result.response.headers.items():
+								if key not in response.headers:
+									response.headers.add(key, value)
+					if errors:
+						validation_error = RequestValidationError(errors, body=body)
+						raise validation_error
+
+				except HTTPException as exc:
+					if self.exception_handlers.get(HTTPException):
+						return self.exception_handlers[HTTPException](request, exc)
+					else:
+						return http_exception_handler(request, exc)
+				except RequestValidationError as exc:
+					if self.exception_handlers.get(RequestValidationError):
+						return self.exception_handlers[RequestValidationError](request, exc)
+					else:
+						return request_validation_exception_handler(request, exc)
+				except ResponseValidationError as exc:
+					if self.exception_handlers.get(ResponseValidationError):
+						return self.exception_handlers[ResponseValidationError](request, exc)
+					else:
+						return response_validation_exception_handler(request, exc)
+				except Exception as exc:
+					# Check if there's a custom handler for this exception type
+					for exc_type, handler in self.exception_handlers.items():
+						if isinstance(exc, exc_type):
+							return handler(request, exc)
+					raise exc
+
+		if response is None:
+			raise FrappeAPIError("No response object was returned.")
+
+		return response
 
 	def __repr__(self) -> str:
 		class_name = self.__class__.__name__
