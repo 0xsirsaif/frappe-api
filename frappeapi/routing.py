@@ -20,6 +20,11 @@ from typing import (
 from typing_extensions import Literal
 
 try:
+	from multipart.multipart import parse_options_header
+except ModuleNotFoundError:  # pragma: nocover
+	parse_options_header = None
+
+try:
 	import frappe
 	from frappe import whitelist
 except ImportError:
@@ -508,16 +513,20 @@ class APIRoute(FastAPIRoute):
 		self.exception_handlers = exception_handlers
 
 	def handle_request(self, *args, **kwargs):
+		MAX_IN_MEMORY_FILE_SIZE = 1 * 1024 * 1024  # 1MB
 		request = frappe.request
 		is_body_form = self.body_field and isinstance(self.body_field.field_info, params.Form)
+
 		with ExitStack() as file_stack:
 			try:
 				body: Any = None
 				if self.body_field:
-					"""
-
-					"""
 					if is_body_form:
+						# 1. Ensure python-multipart is available
+						assert (
+							parse_options_header is not None
+						), "The `python-multipart` library must be installed to use form parsing."
+
 						combined_data = MultiDict()
 
 						# Add form fields
@@ -526,25 +535,41 @@ class APIRoute(FastAPIRoute):
 
 						# Add and manage file fields
 						if request.files:
-							# Handle file uploads differently
 							for field_name, fileobj in request.files.items():
 								if hasattr(fileobj, "read"):
-									# Read the file content
-									file_content = fileobj.read()
-									# Reset file pointer for potential future reads
-									fileobj.seek(0)
-									# Store the content instead of FileStorage object
-									combined_data[field_name] = file_content
-									# Register cleanup
-									if hasattr(fileobj, "close"):
-										file_stack.callback(fileobj.close)
+									content_length = getattr(fileobj, "content_length", None)
+									if content_length is not None:
+										if content_length <= MAX_IN_MEMORY_FILE_SIZE:
+											# Small file: Read content into memory
+											file_content = fileobj.read()
+											combined_data[field_name] = file_content
+											fileobj.close()  # Explicitly close the file
+										else:
+											# Large file: Wrap in UploadFile without reading
+											upload_file = UploadFile(file=fileobj)
+											combined_data[field_name] = upload_file
+											if hasattr(fileobj, "close"):
+												file_stack.callback(fileobj.close)
+									else:
+										# content_length is not set; treat as large file
+										upload_file = UploadFile(file=fileobj)
+										combined_data[field_name] = upload_file
+										if hasattr(fileobj, "close"):
+											file_stack.callback(fileobj.close)
+								else:
+									# Handle cases where 'read' is not available
+									raise HTTPException(
+										status_code=400,
+										detail=f"Cannot process the uploaded file for field '{field_name}'.",
+									)
 
 						body = combined_data
 					else:
+						# Handle JSON or other non-form bodies
 						body_bytes = request.get_data()
 						if body_bytes:
 							json_body: Any = Undefined
-							content_type_value = request.headers.get("content-type")
+							content_type_value = request.headers.get("content-type", "")
 							if not content_type_value:
 								json_body = request.get_json(silent=True)
 							else:
@@ -591,6 +616,7 @@ class APIRoute(FastAPIRoute):
 					errors = solved_result.errors
 					if not errors:
 						request_data = solved_result.values
+						raise Exception("test")
 						raw_response = self.endpoint(**request_data)
 
 						if isinstance(raw_response, WerkzeugResponse):
@@ -653,7 +679,6 @@ class APIRoute(FastAPIRoute):
 					else:
 						return response_validation_exception_handler(request, exc)
 				except Exception as exc:
-					# Check if there's a custom handler for this exception type
 					for exc_type, handler in self.exception_handlers.items():
 						if isinstance(exc, exc_type):
 							return handler(request, exc)

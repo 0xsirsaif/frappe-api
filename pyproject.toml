@@ -44,6 +44,8 @@ dependencies = [
     "openapi_pydantic_v2>=0.1.0,<2.0.0",
     "Werkzeug>=2.3.8",
     "fastapi~=0.115.2",
+    # For forms and file uploads
+    "python-multipart >=0.0.7",
 ]
 [project.optional-dependencies]
 dev = [
