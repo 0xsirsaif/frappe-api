@@ -86,7 +86,6 @@ from fastapi.utils import generate_unique_id, get_value_or_default, is_body_allo
 from pydantic import BaseModel, PydanticSchemaGenerationError
 from pydantic._internal._utils import lenient_issubclass
 from pydantic.fields import FieldInfo
-from werkzeug.datastructures import MultiDict
 from werkzeug.wrappers import (
 	Request as WerkzeugRequest,
 	Response as WerkzeugResponse,
@@ -247,8 +246,8 @@ def _extract_form_body(
 		value = _get_multidict_value(field, received_body)
 
 		if isinstance(first_field_info, params.File) and is_bytes_field(field) and isinstance(value, UploadFile):
-			# Synchronously read the file content
-			value = value.read()
+			# Synchronously read the file content using the underlying file object
+			value = value.file.read()
 		elif is_bytes_sequence_field(field) and isinstance(first_field_info, params.File) and value_is_sequence(value):
 			# For sequence types, read each file sequentially
 			assert isinstance(value, sequence_types)  # type: ignore[arg-type]
@@ -256,7 +255,7 @@ def _extract_form_body(
 
 			for sub_value in value:
 				# Synchronously read each file and append the content
-				file_content = sub_value.read()
+				file_content = sub_value.file.read()
 				results.append(file_content)
 
 			value = serialize_sequence_value(field=field, value=results)
@@ -522,38 +521,59 @@ class APIRoute(FastAPIRoute):
 				body: Any = None
 				if self.body_field:
 					if is_body_form:
-						# 1. Ensure python-multipart is available
+						# Ensure python-multipart is available
 						assert (
 							parse_options_header is not None
 						), "The `python-multipart` library must be installed to use form parsing."
 
-						combined_data = MultiDict()
+						# Convert werkzeug headers to starlette headers
+						headers_dict = defaultdict(list)
+						for key, value in request.headers.items():
+							headers_dict[key].append(value)
+
+						combined_headers = {key: ", ".join(values) for key, values in headers_dict.items()}
+						request_headers = Headers(combined_headers)
+
+						# items of FormData
+						_items: list[tuple[str, str | UploadFile]] = []
 
 						# Add form fields
 						if request.form:
-							combined_data.update(request.form)
+							for key, value in request.form.items():
+								_items.append((key, value))
 
 						# Add and manage file fields
 						if request.files:
 							for field_name, fileobj in request.files.items():
 								if hasattr(fileobj, "read"):
 									content_length = getattr(fileobj, "content_length", None)
-									if content_length is not None:
+									# Check if content_length is set and is greater than 0
+									# This is to avoid the case where content_length is not set
+									# and the file is being read into memory
+									if content_length is not None and content_length > 0:
 										if content_length <= MAX_IN_MEMORY_FILE_SIZE:
 											# Small file: Read content into memory
 											file_content = fileobj.read()
-											combined_data[field_name] = file_content
+											_items.append((field_name, file_content))
 											fileobj.close()  # Explicitly close the file
 										else:
 											# Large file: Wrap in UploadFile without reading
-											upload_file = UploadFile(file=fileobj)
-											combined_data[field_name] = upload_file
+											upload_file = UploadFile(
+												file=fileobj,
+												headers=request_headers,
+											)
+											_items.append((field_name, upload_file))
 											if hasattr(fileobj, "close"):
+												# Attach close callback to the file object
 												file_stack.callback(fileobj.close)
 									else:
 										# content_length is not set; treat as large file
-										upload_file = UploadFile(file=fileobj)
-										combined_data[field_name] = upload_file
+										upload_file = UploadFile(
+											file=fileobj,
+											filename=fileobj.filename,
+											headers=request_headers,
+										)
+										_items.append((field_name, upload_file))
 										if hasattr(fileobj, "close"):
 											file_stack.callback(fileobj.close)
 								else:
@@ -562,8 +582,7 @@ class APIRoute(FastAPIRoute):
 										status_code=400,
 										detail=f"Cannot process the uploaded file for field '{field_name}'.",
 									)
-
-						body = combined_data
+						body = FormData(_items)
 					else:
 						# Handle JSON or other non-form bodies
 						body_bytes = request.get_data()
@@ -616,7 +635,6 @@ class APIRoute(FastAPIRoute):
 					errors = solved_result.errors
 					if not errors:
 						request_data = solved_result.values
-						raise Exception("test")
 						raw_response = self.endpoint(**request_data)
 
 						if isinstance(raw_response, WerkzeugResponse):
