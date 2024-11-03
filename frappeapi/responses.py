@@ -57,3 +57,55 @@ class JSONResponse(Response):
 
 	# Make json a property that can be get and set
 	json = property(json.fget, set_json)
+
+
+class PlainTextResponse(Response):
+	"""
+	A custom Werkzeug Response class for plain text content.
+	"""
+
+	media_type = "text/plain"
+	default_mimetype = "text/plain"
+
+	def __init__(
+		self,
+		content: Any = None,
+		status_code: int | str | HTTPStatus | None = 200,
+		headers: Optional[dict] = None,
+		media_type: str = "text/plain",
+		**kwargs,
+	):
+		"""
+		Initialize the PlainTextResponse.
+
+		Args:
+			content: The content to be returned as plain text.
+			status_code: HTTP status code.
+			headers: Additional headers to include in the response.
+			media_type: The media type to use. If not provided, uses the default_mimetype.
+		"""
+		if content is not None and not isinstance(content, str):
+			content = str(content)
+
+		super().__init__(
+			response=content,
+			status=status_code,
+			headers=headers,
+			mimetype=media_type,
+			content_type=media_type,
+			**kwargs,
+		)
+
+	@property
+	def text(self) -> str:
+		"""Get the text data."""
+		return self.get_data(as_text=True)
+
+	def set_text(self, value: Any) -> None:
+		"""Set new text data."""
+		if not isinstance(value, str):
+			value = str(value)
+		self.set_data(value)
+
+	# Make text a property that can be get and set
+	text = property(text.fget, set_text)
