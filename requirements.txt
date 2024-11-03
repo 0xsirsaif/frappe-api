@@ -1,5 +1,4 @@
 pydantic==2.6.4,<3.0.0
 typing-extensions>=4.12.2
-openapi_pydantic_v2>=0.1.0,<2.0.0
 Werkzeug>=2.3.8
 fastapi~=0.115.2
