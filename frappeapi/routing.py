@@ -97,7 +97,7 @@ from frappeapi.exception_handler import (
 	response_validation_exception_handler,
 )
 from frappeapi.exceptions import FrappeAPIError, HTTPException, RequestValidationError, ResponseValidationError
-from frappeapi.responses import JSONResponse
+from frappeapi.responses import JSONResponse, PlainTextResponse
 from frappeapi.utils import extract_endpoint_relative_path
 
 
@@ -619,7 +619,7 @@ class APIRoute(FastAPIRoute):
 				# If a middleware raises an HTTPException, it should be raised again
 				raise
 			except Exception as e:
-				http_error = HTTPException(status=400, detail="There was an error parsing the body")
+				http_error = HTTPException(status_code=400, detail="There was an error parsing the body")
 				raise http_error from e
 
 			errors: List[Any] = []
@@ -697,13 +697,31 @@ class APIRoute(FastAPIRoute):
 					else:
 						return response_validation_exception_handler(request, exc)
 				except Exception as exc:
+					# If any other exception is raised, return a 500 response.
+					# First check if there is a custom exception handler for this exception.
+					# If not, return a 500 response with the exception details.
+					# Subress the exception details to avoid exposing sensitive information.
 					for exc_type, handler in self.exception_handlers.items():
 						if isinstance(exc, exc_type):
 							return handler(request, exc)
-					raise exc
 
-		if response is None:
-			raise FrappeAPIError("No response object was returned.")
+					# TODO: To be determined: use repr or str? repr for type and message, str for message only
+					return JSONResponse(content={"detail": str(exc)}, status_code=500)
+
+		# TODO:
+		# Again, it's a workaround to avoid the error from bubbling up to the user.
+		# If there's a FrappeAPIError, return a 500 response with the 'Internal server error' message.
+		# And print the traceback to the console for debugging.
+		try:
+			if response is None:
+				raise FrappeAPIError("No response object was returned.")
+		except FrappeAPIError:
+			import traceback
+
+			traceback.print_stack()
+			traceback.print_exc()
+
+			return PlainTextResponse(content="Internal server error", status_code=500)
 
 		return response
 

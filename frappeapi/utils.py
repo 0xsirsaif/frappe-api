@@ -3,6 +3,9 @@ import os
 
 
 def extract_endpoint_relative_path(func):
+	"""
+	Extract the relative path of the endpoint from the function for the API docs.
+	"""
 	full_path = inspect.getfile(func)
 	path_parts = full_path.split(os.sep)
 	try:
