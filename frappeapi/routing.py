@@ -4,26 +4,16 @@ import json
 from collections import defaultdict
 from contextlib import ExitStack
 from enum import Enum, IntEnum
-from typing import (
-	Any,
-	Callable,
-	Dict,
-	List,
-	Optional,
-	Sequence,
-	Set,
-	Tuple,
-	Type,
-	Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Pattern, Sequence, Set, Tuple, Type, Union
 
 from typing_extensions import Literal
 
 try:
-	from multipart.multipart import parse_options_header
+	from python_multipart.multipart import parse_options_header
 except ModuleNotFoundError:  # pragma: nocover
 	parse_options_header = None
 
+# TODO: Have a compelete frappe mock for testing and development
 try:
 	import frappe
 	from frappe import whitelist
@@ -86,6 +76,7 @@ from fastapi.utils import generate_unique_id, get_value_or_default, is_body_allo
 from pydantic import BaseModel, PydanticSchemaGenerationError
 from pydantic._internal._utils import lenient_issubclass
 from pydantic.fields import FieldInfo
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from werkzeug.wrappers import (
 	Request as WerkzeugRequest,
 	Response as WerkzeugResponse,
@@ -368,6 +359,7 @@ def parse_and_validate_request(
 	values.update(header_values)
 	errors += query_errors + header_errors
 
+	# TODO: response is expected to be a Starlette Response, but it is WerkzeugResponse
 	return SolvedDependency(values=values, errors=errors, background_tasks=None, response=response, dependency_cache={})
 
 
@@ -403,7 +395,8 @@ class APIRoute(FastAPIRoute):
 			generate_unique_id
 		),
 		# Frappe parameters
-		exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]],
+		exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]]
+		| None = None,
 	):
 		self.prefix = "/api/method"
 		self.endpoint = endpoint
@@ -432,14 +425,16 @@ class APIRoute(FastAPIRoute):
 		self.generate_unique_id_function = generate_unique_id_function
 		self.tags = tags or []
 		self.responses = responses or {}
-		self.name = name or getattr(self.endpoint, "__name__", None)
-		self.path_regex, self.path_format, self.param_convertors = None, self.path, {}
+		self.name: Optional[str] = name or getattr(self.endpoint, "__name__", None)  # type: ignore
+		self.path_regex: Optional[Pattern[str]] = None  # type: ignore
+		self.path_format: str = self.path
+		self.param_convertors: Dict[str, Any] = {}
 
 		if methods is None:
 			methods = ["GET"]
 		self.methods: Set[str] = {method.upper() for method in methods}
 		if isinstance(generate_unique_id_function, DefaultPlaceholder):
-			current_generate_unique_id: Callable[[APIRoute], str] = generate_unique_id_function.value
+			current_generate_unique_id = generate_unique_id_function.value
 		else:
 			current_generate_unique_id = generate_unique_id_function
 		self.unique_id = self.operation_id or current_generate_unique_id(self)
@@ -509,9 +504,9 @@ class APIRoute(FastAPIRoute):
 			embed_body_fields=self._embed_body_fields,
 		)
 
-		self.exception_handlers = exception_handlers
+		self.exception_handlers = {} if exception_handlers is None else exception_handlers
 
-	def handle_request(self, *args, **kwargs):
+	def handle_request(self, *args, **kwargs) -> WerkzeugResponse:
 		MAX_IN_MEMORY_FILE_SIZE = 1 * 1024 * 1024  # 1MB
 		request = frappe.request
 		is_body_form = self.body_field and isinstance(self.body_field.field_info, params.Form)
@@ -535,7 +530,7 @@ class APIRoute(FastAPIRoute):
 						request_headers = Headers(combined_headers)
 
 						# items of FormData
-						_items: list[tuple[str, str | UploadFile]] = []
+						_items: list[tuple[str, str | StarletteUploadFile]] = []
 
 						# Add form fields
 						if request.form:
@@ -666,13 +661,13 @@ class APIRoute(FastAPIRoute):
 							)
 
 							if isinstance(self.response_class, DefaultPlaceholder):
-								actual_response_class: Type[WerkzeugResponse] = self.response_class.value
+								actual_response_class = self.response_class.value
 							else:
 								actual_response_class = self.response_class
 
 							response = actual_response_class(content, **response_args)
 							if not is_body_allowed_for_status_code(response.status_code):
-								response.body = b""
+								response.data = b""
 
 							for key, value in solved_result.response.headers.items():
 								if key not in response.headers:
@@ -749,7 +744,8 @@ class APIRouter:
 		webhooks: Optional[List[Any]] = None,
 		servers: Optional[List[Dict[str, Union[str, Any]]]] = None,
 		default_response_class: Type[WerkzeugResponse] = Default(WerkzeugResponse),
-		exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]] = None,
+		exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]]
+		| None = None,
 	):
 		self.default_response_class = default_response_class
 		self.routes: List[APIRoute] = []
@@ -798,7 +794,7 @@ class APIRouter:
 		summary: Optional[str] = None,
 		include_in_schema: bool = True,
 		methods: Optional[List[str]] = None,
-		response_class: Type[WerkzeugResponse] = Default(JSONResponse),
+		response_class: Type[WerkzeugResponse] | DefaultPlaceholder = Default(JSONResponse),
 		# Frappe parameters
 		allow_guest: bool = False,
 		xss_safe: bool = False,

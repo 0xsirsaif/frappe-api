@@ -50,13 +50,11 @@ class JSONResponse(Response):
 		"""Get the JSON-decoded data."""
 		return json.loads(self.get_data(as_text=True))
 
-	def set_json(self, value: Any) -> None:
+	@json.setter
+	def json(self, value: Any) -> None:
 		"""Set new JSON data."""
 		encoded_value = jsonable_encoder(value)
 		self.set_data(json.dumps(encoded_value))
-
-	# Make json a property that can be get and set
-	json = property(json.fget, set_json)
 
 
 class PlainTextResponse(Response):
@@ -101,11 +99,9 @@ class PlainTextResponse(Response):
 		"""Get the text data."""
 		return self.get_data(as_text=True)
 
-	def set_text(self, value: Any) -> None:
+	@text.setter
+	def text(self, value: Any) -> None:
 		"""Set new text data."""
 		if not isinstance(value, str):
 			value = str(value)
 		self.set_data(value)
-
-	# Make text a property that can be get and set
-	text = property(text.fget, set_text)
