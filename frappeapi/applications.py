@@ -28,7 +28,7 @@ class FrappeAPI:
 		exception_handlers: Optional[
 			Dict[
 				Union[int, Type[Exception]],
-				Callable[[WerkzeugResponse, Any], WerkzeugResponse],
+				Callable[[WerkzeugRequest, Exception], WerkzeugResponse],
 			]
 		] = None,
 	):
@@ -46,8 +46,8 @@ class FrappeAPI:
 		assert self.title, "A title must be provided for OpenAPI, e.g.: 'My API'"
 		assert self.version, "A version must be provided for OpenAPI, e.g.: '1.0.0'"
 
-		self.exception_handlers: Dict[Type[Exception], Callable] = (
-			{} if exception_handlers is None else exception_handlers
+		self.exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]] = (
+			{} if exception_handlers is None else dict(exception_handlers)  # type: ignore
 		)
 		self.router = APIRouter(
 			title=self.title,
