@@ -101,6 +101,14 @@ The goal is to build a better API framework for Frappe.
 
 - [ ] Support for rate limiting.
 
+### Dependencies
+
+- [ ] Support for dependencies.
+
+### Middleware
+
+- [ ] Support for middleware.
+
 ### Miscellaneous
 
 - [ ] Debugging capabilities.
