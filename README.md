@@ -81,6 +81,7 @@ The goal is to build a better API framework for Frappe.
 - [x] ResponseValidationError
 - [x] Register custom exception handlers. See [Add custom headers](https://fastapi.tiangolo.com/tutorial/handling-errors/#add-custom-headers)
 - [x] Override default exception handlers.
+- [ ] Maintain Frappe Transaction Management.
 
 ### Response Models
 
@@ -95,6 +96,14 @@ The goal is to build a better API framework for Frappe.
 - [x] Numeric validations, `gt`, `ge`, `lt`, `le`.
 - [x] Metadata, `title`, `description`, `deprecated`.
 - [x] others, `include_in_schema`.
+
+### Rate Limiting
+
+- [ ] Support for rate limiting.
+
+### Miscellaneous
+
+- [ ] Debugging capabilities.
 
 ## Related Frappe PRs and Issues
 

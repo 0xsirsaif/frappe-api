@@ -1,6 +1,8 @@
 import http
 from typing import Any, Sequence
 
+from werkzeug.exceptions import HTTPException as WerkzeugHTTPException
+
 
 class FrappeAPIError(Exception):
 	pass
@@ -10,7 +12,7 @@ class ErrorWrapper(Exception):
 	pass
 
 
-class HTTPException(Exception):
+class HTTPException(WerkzeugHTTPException):
 	def __init__(
 		self,
 		status_code: int,
@@ -19,6 +21,8 @@ class HTTPException(Exception):
 	) -> None:
 		if detail is None:
 			detail = http.HTTPStatus(status_code).phrase
+		super().__init__(description=detail, response=None)
+
 		self.status_code = status_code
 		self.detail = detail
 		self.headers = headers

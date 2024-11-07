@@ -675,36 +675,55 @@ class APIRoute(FastAPIRoute):
 					if errors:
 						validation_error = RequestValidationError(errors, body=body)
 						raise validation_error
-
-				except HTTPException as exc:
-					if self.exception_handlers.get(HTTPException):
-						return self.exception_handlers[HTTPException](request, exc)
-					else:
-						return http_exception_handler(request, exc)
 				except RequestValidationError as exc:
 					if self.exception_handlers.get(RequestValidationError):
-						return self.exception_handlers[RequestValidationError](request, exc)
+						response = self.exception_handlers[RequestValidationError](request, exc)
 					else:
-						return request_validation_exception_handler(request, exc)
+						response = request_validation_exception_handler(request, exc)
+
 				except ResponseValidationError as exc:
 					if self.exception_handlers.get(ResponseValidationError):
-						return self.exception_handlers[ResponseValidationError](request, exc)
+						response = self.exception_handlers[ResponseValidationError](request, exc)
 					else:
-						return response_validation_exception_handler(request, exc)
+						response = response_validation_exception_handler(request, exc)
+				except HTTPException as exc:
+					if self.exception_handlers.get(HTTPException):
+						response = self.exception_handlers[HTTPException](request, exc)
+					else:
+						response = http_exception_handler(request, exc)
 				except Exception as exc:
 					# If any other exception is raised, return a 500 response.
 					# First check if there is a custom exception handler for this exception.
 					# If not, return a 500 response with the exception details.
 					# Subress the exception details to avoid exposing sensitive information.
-					for exc_type, handler in self.exception_handlers.items():
-						if isinstance(exc, exc_type):
-							return handler(request, exc)
+					if self.exception_handlers.get(type(exc)):
+						response = self.exception_handlers[type(exc)](request, exc)
+					else:
+						response = JSONResponse(content={"detail": repr(exc)}, status_code=500)
+				else:
+					# The else block will run only if no exception is raised in the try block
+					# So no need to handle anything here. Let Frappe handle DB sync.
+					pass
+				finally:
+					# https://docs.python.org/3/tutorial/errors.html#defining-clean-up-actions
 
-					# TODO: To be determined: use repr or str? repr for type and message, str for message only
-					return JSONResponse(content={"detail": str(exc)}, status_code=500)
+					# > - If an exception occurs during execution of the try clause,
+					# the exception may be handled by an except clause.
+					# > - If the exception is not handled by an except clause,
+					# the exception is re-raised after the finally clause has been executed.
+					# > - An exception could occur during execution of an except or else clause.
+					# Again, the exception is re-raised after the finally clause has been executed.
+					# > If the finally clause executes a break, continue or return statement,
+					# exceptions are not re-raised.
+					# > If the try statement reaches a break, continue or return statement,
+					# the finally clause will execute just prior to the break, continue or return statement’s execution.
+					# > If a finally clause includes a return statement,
+					# the returned value will be the one from the finally clause’s return statement,
+					# not the value from the try clause’s return statement.
+					pass
 
 		# TODO:
-		# Again, it's a workaround to avoid the error from bubbling up to the user.
+		# Avoid the error from bubbling up to the user.
 		# If there's a FrappeAPIError, return a 500 response with the 'Internal server error' message.
 		# And print the traceback to the console for debugging.
 		try:
