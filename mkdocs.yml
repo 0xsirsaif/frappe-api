@@ -1,36 +1,11 @@
 site_name: FrappeAPI
 site_url: https://0xsirsaif.github.io/frappe-api/
-theme:
-  name: material
-  palette:
-    primary: deep purple
-    accent: deep purple
-  features:
-    - navigation.instant
-    - navigation.tracking
-    - navigation.tabs
-    - navigation.sections
-    - navigation.expand
-    - toc.integrate
-    - content.code.copy
-
+site_author: Muhammad Saif
+site_description: A FastAPI wrapper for Frappe Framework
 repo_name: 0xsirsaif/frappe-api
 repo_url: https://github.com/0xsirsaif/frappe-api
+edit_uri: https://github.com/0xsirsaif/frappe-api/tree/main/docs
 
-nav:
-  - FrappeAPI: index.md
-  - Roadmap: roadmap.md
-
-markdown_extensions:
-  - pymdownx.superfences
-  - pymdownx.tabbed:
-      alternate_style: true
-  - admonition
-  - pymdownx.details
-  - pymdownx.tasklist:
-      custom_checkbox: true
-  - toc:
-      permalink: true
 
 extra:
   social:
@@ -38,3 +13,55 @@ extra:
       link: https://github.com/0xsirsaif/frappe-api
     - icon: fontawesome/brands/twitter
       link: https://x.com/0xsirsaif
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - toc.integrate
+    - content.code.copy
+  palette:
+    # Palette for light mode
+    - scheme: default
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - scheme: slate
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to light mode
+  
+
+nav:
+  - Introduction: index.md
+  - OpenAPI Docs: openapi_docs.md
+  - Roadmap: roadmap.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - attr_list
+  - md_in_html
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.snippets:
+      check_paths: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - toc:
+      permalink: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
