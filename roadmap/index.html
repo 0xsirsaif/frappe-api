@@ -277,6 +277,26 @@
   
   
     <li class="md-nav__item">
+      <a href="../usage_examples/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Usage Examples
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../openapi_docs/" class="md-nav__link">
         
   
@@ -442,6 +462,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#response-model-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      Response Model Features
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#rate-limiting" class="md-nav__link">
     <span class="md-ellipsis">
       Rate Limiting
@@ -596,8 +625,23 @@
 <ul class="task-list">
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> String validations, <code>min_length</code>, <code>max_length</code>, <code>pattern</code>.</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Numeric validations, <code>gt</code>, <code>ge</code>, <code>lt</code>, <code>le</code>.</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Metadata, <code>title</code>, <code>description</code>, <code>deprecated</code>.</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Metadata, <code>title</code>, <code>description</code>.</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> others, <code>include_in_schema</code>.</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>deprecated</code></li>
+</ul>
+<h2 id="response-model-features">Response Model Features<a class="headerlink" href="#response-model-features" title="Permanent link">&para;</a></h2>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Method <code>response_model</code> parameter to define response model as Pydantic model. <code>response_model=Model</code>, <code>response_model=list[Model]</code> ...etc</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Response model as return type with standard type hints or Pydantic model. <code>-&gt; Model</code>, <code>-&gt; list[Model]</code>...etc</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Limit and filter the output data to what is defined in the return type.</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> <code>response_model</code> parameter takes precedence over return type if both are provided.</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>response_model_include</code> to include only specific fields in response</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>response_model_exclude</code> to exclude specific fields from response</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>response_model_by_alias</code> to control whether to use field aliases in response</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>response_model_exclude_unset</code> to exclude unset fields from response</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>response_model_exclude_defaults</code> to exclude fields with default values from response</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>response_model_exclude_none</code> to exclude None fields from response</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Support for Union response models (multiple possible response types)</li>
 </ul>
 <h2 id="rate-limiting">Rate Limiting<a class="headerlink" href="#rate-limiting" title="Permanent link">&para;</a></h2>
 <ul class="task-list">
