@@ -43,6 +43,7 @@ theme:
 
 nav:
   - Introduction: index.md
+  - Usage Examples: usage_examples.md
   - OpenAPI Docs: openapi_docs.md
   - Roadmap: roadmap.md
 

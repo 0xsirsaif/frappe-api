@@ -83,8 +83,23 @@
 
 - [x] String validations, `min_length`, `max_length`, `pattern`.
 - [x] Numeric validations, `gt`, `ge`, `lt`, `le`.
-- [x] Metadata, `title`, `description`, `deprecated`.
+- [x] Metadata, `title`, `description`.
 - [x] others, `include_in_schema`.
+- [ ] `deprecated`
+
+## Response Model Features
+
+- [x] Method `response_model` parameter to define response model as Pydantic model. `response_model=Model`, `response_model=list[Model]` ...etc
+- [x] Response model as return type with standard type hints or Pydantic model. `-> Model`, `-> list[Model]`...etc
+- [x] Limit and filter the output data to what is defined in the return type.
+- [x] `response_model` parameter takes precedence over return type if both are provided.
+- [ ] `response_model_include` to include only specific fields in response
+- [ ] `response_model_exclude` to exclude specific fields from response
+- [ ] `response_model_by_alias` to control whether to use field aliases in response
+- [ ] `response_model_exclude_unset` to exclude unset fields from response
+- [ ] `response_model_exclude_defaults` to exclude fields with default values from response
+- [ ] `response_model_exclude_none` to exclude None fields from response
+- [ ] Support for Union response models (multiple possible response types)
 
 ## Rate Limiting
 
