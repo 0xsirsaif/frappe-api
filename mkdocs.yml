@@ -12,7 +12,7 @@ extra:
     - icon: fontawesome/brands/github-alt
       link: https://github.com/0xsirsaif/frappe-api
     - icon: fontawesome/brands/twitter
-      link: https://x.com/0xsirsaif
+      link: https://x.com/0xsaif_
 
 theme:
   name: material
@@ -43,6 +43,7 @@ theme:
 
 nav:
   - Introduction: index.md
+  - Usage Examples: usage_examples.md
   - OpenAPI Docs: openapi_docs.md
   - Roadmap: roadmap.md
 
