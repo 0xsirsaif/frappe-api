@@ -2,9 +2,6 @@
 
 Better APIs for Frappe!
 
-⚠️ **Alert: Beta Version**
-This project is currently in beta. Expect changes and improvements as we work towards a stable release.
-
 ## Why?
 
 The goal is to build a better API framework for Frappe.

@@ -1,4 +1,4 @@
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 from fastapi.datastructures import UploadFile  # noqa: F401
 from fastapi.params import (
