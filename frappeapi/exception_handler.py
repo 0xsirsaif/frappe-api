@@ -3,6 +3,16 @@ from werkzeug.wrappers import Request as WerkzeugRequest, Response as WerkzeugRe
 
 from frappeapi.exceptions import HTTPException, RequestValidationError, ResponseValidationError
 from frappeapi.responses import JSONResponse
+import traceback
+
+try:
+	import frappe  # type: ignore[import-not-found]
+	from frappe import whitelist  # type: ignore[import-not-found]
+except ImportError:
+	from unittest.mock import MagicMock
+
+	frappe = MagicMock()
+	whitelist = MagicMock()
 
 
 def request_validation_exception_handler(request: WerkzeugRequest, exc: RequestValidationError) -> WerkzeugResponse:
@@ -10,10 +20,13 @@ def request_validation_exception_handler(request: WerkzeugRequest, exc: RequestV
 
 
 def http_exception_handler(request: WerkzeugRequest, exc: HTTPException) -> WerkzeugResponse:
+	traceback.print_exc()
+
 	headers = getattr(exc, "headers", None)
 	if not is_body_allowed_for_status_code(exc.status_code):
 		return JSONResponse(status_code=exc.status_code, headers=headers)
 
+	frappe.log_error(traceback.format_exc(), "HTTP Exception")
 	return JSONResponse(content={"detail": exc.detail}, status_code=exc.status_code, headers=headers)
 
 
@@ -25,4 +38,6 @@ def response_validation_exception_handler(request: WerkzeugRequest, exc: Respons
 	> not returning what it should, and it will return a server error instead of returning incorrect data.
 	> This way you and your clients can be certain that they will receive the data and the data shape expected.
 	"""
+	traceback.print_exc()
+	frappe.log_error(traceback.format_exc(), "Response Validation Exception")
 	return JSONResponse(content={"detail": exc.errors()}, status_code=500)

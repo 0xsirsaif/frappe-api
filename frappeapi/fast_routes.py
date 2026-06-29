@@ -138,7 +138,7 @@ def _create_v14_patch(orig_handle: Callable) -> Callable:
 		Patched handle function (no parameters)
 	"""
 
-	def patched_handle() -> types.ModuleType | dict:
+	def patched_handle(request=None) -> types.ModuleType | dict:
 		request_path = frappe.local.request.path
 
 		for app_instance in _FRAPPEAPI_INSTANCES:
@@ -187,6 +187,8 @@ def _create_v14_patch(orig_handle: Callable) -> Callable:
 		# No FastAPI-style route matched for any app instance in FastAPI mode,
 		# or the path was not a FastAPI-style candidate.
 		# Fall back to the original Frappe handler for dotted paths or other unhandled /api/ calls.
+		if request:
+			return orig_handle(request)
 		return orig_handle()
 
 	return patched_handle

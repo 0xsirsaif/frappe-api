@@ -5,7 +5,6 @@ from collections import defaultdict
 from contextlib import ExitStack, suppress
 from enum import Enum, IntEnum
 from typing import Any, Callable, Dict, List, Optional, Pattern, Sequence, Set, Tuple, Type, Union, cast
-
 from typing_extensions import Literal
 
 parse_options_header: Optional[Callable[[str | bytes | None], tuple[bytes, dict[bytes, bytes]]]] = None
@@ -595,7 +594,7 @@ class APIRoute(FastAPIRoute):
 											# Small file: Read content into memory
 											file_content = fileobj.read()
 											_items.append((field_name, file_content))
-											fileobj.close()  # Explicitly close the file
+											# fileobj.close()  # Explicitly close the file
 										else:
 											# Large file: Wrap in UploadFile without reading
 											upload_file = UploadFile(
@@ -603,8 +602,9 @@ class APIRoute(FastAPIRoute):
 												headers=request_headers,
 											)
 											_items.append((field_name, upload_file))
-											if hasattr(fileobj, "close"):
-												file_stack_form_files.callback(fileobj.close)
+											# FIXME: add callbacks for after body handling
+											# if hasattr(fileobj, "close"):
+											# 	file_stack_form_files.callback(fileobj.close)
 									else:
 										# content_length is not set; treat as large file
 										upload_file = UploadFile(
@@ -613,8 +613,8 @@ class APIRoute(FastAPIRoute):
 											headers=request_headers,
 										)
 										_items.append((field_name, upload_file))
-										if hasattr(fileobj, "close"):
-											file_stack_form_files.callback(fileobj.close)
+										# if hasattr(fileobj, "close"):
+										# 	file_stack_form_files.callback(fileobj.close)
 								else:
 									# Handle cases where 'read' is not available
 									raise HTTPException(
@@ -743,10 +743,13 @@ class APIRoute(FastAPIRoute):
 				else:
 					response = http_exception_handler(request, exc)
 			except Exception as exc:
+				import traceback
 				# If any other exception is raised, return a 500 response.
 				# First check if there is a custom exception handler for this exception.
 				# If not, return a 500 response with the exception details.
 				# Subress the exception details to avoid exposing sensitive information.
+				# frappe.log_error(traceback.format_exc(), "Unknown Exception")
+				traceback.print_exc()
 				if self.exception_handlers.get(type(exc)):
 					response = self.exception_handlers[type(exc)](request, exc)
 				else:
@@ -782,7 +785,6 @@ class APIRoute(FastAPIRoute):
 				raise FrappeAPIError("No response object was returned.")
 		except FrappeAPIError:
 			import traceback
-
 			traceback.print_stack()
 			traceback.print_exc()
 
